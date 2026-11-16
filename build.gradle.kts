@@ -4,7 +4,7 @@ plugins {
     id("org.springframework.boot") version "4.1.1"
 }
 
-group = "com.ganzithon"
+group = "com.yangsenunbam"
 version = "0.0.1-SNAPSHOT"
 
 repositories {

@@ -1,6 +1,6 @@
 spring:
   application:
-    name: counting-sheep
+    name: yangsenunbam
   jackson:
     property-naming-strategy: SNAKE_CASE
     deserialization:
