@@ -2,7 +2,7 @@ package com.yangsenunbam.feed
 
 import com.yangsenunbam.common.*
 import com.yangsenunbam.security.CurrentUser
-import com.yangsenunbam.session.*
+import com.yangsenunbam.session.SessionResponse
 import jakarta.validation.Valid
 import jakarta.validation.constraints.*
 import org.springframework.http.HttpStatus

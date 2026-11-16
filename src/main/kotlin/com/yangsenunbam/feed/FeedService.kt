@@ -2,7 +2,7 @@ package com.yangsenunbam.feed
 
 import com.yangsenunbam.common.*
 import com.yangsenunbam.security.CurrentUser
-import com.yangsenunbam.session.*
+import com.yangsenunbam.session.SessionResponse
 import org.springframework.stereotype.Service
 
 // BE2

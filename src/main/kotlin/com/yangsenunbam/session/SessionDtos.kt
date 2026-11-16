@@ -15,16 +15,6 @@ data class SessionResponse(
     val position: Int, val furthestPosition: Int, val sequence: Long, val writerEpoch: Long,
     val startedAt: Instant, val closesAt: Instant,
 )
-data class ProgressRequest(
-    @field:Min(1) @field:Max(30) val position: Int,
-    @field:Min(1) @field:Max(30) val furthestPosition: Int,
-    @field:Min(1) val sequence: Long,
-    @field:Min(1) val writerEpoch: Long,
-) {
-    @AssertTrue @JsonIgnore
-    fun isPositionOrdered(): Boolean = position <= furthestPosition
-}
-data class ProgressResponse(val position: Int, val furthestPosition: Int, val sequence: Long, val writerEpoch: Long)
 data class FinishRequest(
     val reason: FinishReason,
     @field:Min(1) @field:Max(30) val position: Int,
