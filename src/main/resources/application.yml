@@ -12,3 +12,20 @@ spring:
     datatype:
       datetime:
         write-dates-as-timestamps: false
+
+  datasource:
+    url: ${DB_URL:jdbc:h2:file:./data/yangsebam;MODE=MySQL;DB_CLOSE_ON_EXIT=FALSE}
+    username: ${DB_USERNAME:sa}
+    password: ${DB_PASSWORD:}
+  sql:
+    init:
+      mode: always
+app:
+  auth:
+    hmac-secret: ${AUTH_HMAC_SECRET:}
+
+  legal:
+    terms-version: ${LEGAL_TERMS_VERSION:}
+    privacy-version: ${LEGAL_PRIVACY_VERSION:}
+    terms-url: ${LEGAL_TERMS_URL:}
+    privacy-url: ${LEGAL_PRIVACY_URL:}
