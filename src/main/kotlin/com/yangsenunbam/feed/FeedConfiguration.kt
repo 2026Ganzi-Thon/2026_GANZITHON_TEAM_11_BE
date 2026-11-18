@@ -8,6 +8,7 @@ import com.yangsenunbam.feed.port.FeedCardSource
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
+import org.springframework.context.annotation.Profile
 import java.time.Clock
 
 @Configuration(proxyBeanMethods = false)
@@ -20,12 +21,14 @@ class FeedConfiguration {
     fun feedBuilder(source: FeedCardSource): FeedBuilder = FeedBuilder(source)
 
     @Bean
+    @Profile("!mysql")
     @ConditionalOnMissingBean(FeedCardSource::class)
     fun unconfiguredFeedCardSource(): FeedCardSource = FeedCardSource {
         throw ApiException(ErrorCode.NOT_IMPLEMENTED, "검수된 카드 공급 어댑터 연결이 필요합니다.")
     }
 
     @Bean
+    @Profile("!mysql")
     @ConditionalOnMissingBean(NightStore::class)
     fun unconfiguredNightStore(): NightStore = object : NightStore {
         override fun <T> withUser(userId: String, block: (NightTransaction) -> T): T =

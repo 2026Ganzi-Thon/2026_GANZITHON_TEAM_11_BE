@@ -1,0 +1,46 @@
+name: BE2 MySQL tests
+
+on:
+  push:
+    branches: ["BE2_*"]
+  pull_request:
+    paths:
+      - "src/**"
+      - "build.gradle.kts"
+      - ".github/workflows/be2-mysql.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_DATABASE: be2_test
+          MYSQL_USER: be2_test
+          MYSQL_PASSWORD: be2-test-only
+          MYSQL_ROOT_PASSWORD: root-test-only
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+      - name: Test and build
+        env:
+          MYSQL_TEST_URL: jdbc:mysql://127.0.0.1:3306/be2_test?connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true
+          MYSQL_TEST_USERNAME: be2_test
+          MYSQL_TEST_PASSWORD: be2-test-only
+        run: ./gradlew test mysqlTest bootJar --no-daemon
