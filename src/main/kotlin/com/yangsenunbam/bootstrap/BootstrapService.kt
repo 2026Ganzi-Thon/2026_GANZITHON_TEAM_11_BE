@@ -21,7 +21,6 @@ data class NightSnapshot(
 interface NightSnapshotProvider { fun forUser(userId: String, nightDate: LocalDate): NightSnapshot }
 
 /** Only valid while night/session APIs have not yet been implemented. Must be replaced before release. */
-@org.springframework.stereotype.Component
 class EmptyNightSnapshotProvider : NightSnapshotProvider {
     override fun forUser(userId: String, nightDate: LocalDate) = NightSnapshot()
 }

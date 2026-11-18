@@ -1,6 +1,8 @@
 package com.yangsenunbam.user
 
-import org.springframework.dao.DuplicateKeyException
+import com.yangsenunbam.auth.AuthStore
+import com.yangsenunbam.common.ApiException
+import com.yangsenunbam.common.ErrorCode
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.RowMapper
 import org.springframework.stereotype.Repository
@@ -24,7 +26,7 @@ data class OnboardingProfile(
 
 /** Transactions serialize consent and birth-date changes on a per-user locked row. */
 @Repository
-class OnboardingStore(private val jdbc: JdbcTemplate) {
+class OnboardingStore(private val jdbc: JdbcTemplate, private val auth: AuthStore) {
     private val mapper = RowMapper<OnboardingProfile> { rs, _ -> OnboardingProfile(
         userId = rs.getString("user_id"),
         termsVersion = rs.getString("terms_version"),
@@ -46,14 +48,11 @@ class OnboardingStore(private val jdbc: JdbcTemplate) {
 
     /** Lazily populate accounts registered before BE1 phase 2; must run in a transaction. */
     fun lock(userId: String): OnboardingProfile {
-        try {
-            jdbc.update(
-                "INSERT INTO user_onboarding(user_id) SELECT ? WHERE NOT EXISTS " +
-                    "(SELECT 1 FROM user_onboarding WHERE user_id = ?)", userId, userId,
-            )
-        } catch (_: DuplicateKeyException) {
-            // A concurrent first write created it. Read it with a row lock below.
-        }
+        auth.lockUser(userId) ?: throw ApiException(ErrorCode.RESOURCE_NOT_FOUND, "계정을 찾을 수 없어요.")
+        jdbc.update(
+            "INSERT INTO user_onboarding(user_id) SELECT ? WHERE NOT EXISTS " +
+                "(SELECT 1 FROM user_onboarding WHERE user_id = ?)", userId, userId,
+        )
         return jdbc.query("SELECT $columns FROM user_onboarding WHERE user_id = ? FOR UPDATE", mapper, userId)
             .firstOrNull() ?: error("User profile row could not be loaded")
     }

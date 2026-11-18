@@ -1,0 +1,26 @@
+[Unit]
+Description=Yangsebam Spring Boot backend
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=yangsebam
+Group=yangsebam
+WorkingDirectory=/opt/yangsebam
+EnvironmentFile=/etc/yangsebam/production.env
+ExecStart=/usr/bin/java -jar /opt/yangsebam/yangsebam.jar --spring.profiles.active=prod
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=45
+SuccessExitStatus=143
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+UMask=0077
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

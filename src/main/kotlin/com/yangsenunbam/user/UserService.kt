@@ -1,6 +1,9 @@
 package com.yangsenunbam.user
 
 import com.yangsenunbam.auth.AuthStore
+import com.yangsenunbam.night.NightStore
+import com.yangsenunbam.session.SessionStore
+import com.yangsenunbam.security.TokenService
 import com.yangsenunbam.common.*
 import com.yangsenunbam.security.CurrentUser
 import org.springframework.stereotype.Service
@@ -18,6 +21,10 @@ class UserService(
     private val legal: LegalPolicy,
     private val stats: UserStatsProvider,
     private val clock: Clock,
+    private val nights: NightStore,
+    private val sessions: SessionStore,
+    private val crossDomain: CrossDomainAccountDeletionPort,
+    private val tokens: TokenService,
 ) {
     fun profile(userId: String): OnboardingProfile = store.find(userId)
 
@@ -81,14 +88,24 @@ class UserService(
         return ReminderResponse(request.enabled, request.localTime)
     }
 
-    fun worries(user: CurrentUser, cursor: String?, limit: Int): PageResponse<WorryListItem> = notImplemented()
-    fun deleteAccount(user: CurrentUser): Unit = notImplemented()
+    fun worries(user: CurrentUser, cursor: String?, limit: Int): PageResponse<WorryListItem> =
+        nights.worries(user.id, cursor, limit)
+
+    @Transactional
+    fun deleteAccount(user: CurrentUser) {
+        nights.lockAccount(user.id)
+        val account = auth.findUserById(user.id) ?: throw ApiException(ErrorCode.RESOURCE_NOT_FOUND, "계정이 없어요.")
+        // If BE2/BE3 are not wired, fail CLOSED, leaving all account data unchanged.
+        crossDomain.deleteOwnedData(user.id)
+        sessions.deleteByUser(user.id)
+        nights.deleteByUser(user.id)
+        auth.deleteAccountOwnedData(user.id, "email:${tokens.keyedFingerprint(account.email)}")
+    }
 }
 
 /** Phase 3/4 needs to replace this adapter with real night/session aggregates. */
 interface UserStatsProvider { fun forUser(userId: String): StatsResponse }
 
-@org.springframework.stereotype.Component
 class EmptyStatsProvider : UserStatsProvider {
     override fun forUser(userId: String) = StatsResponse(0, 0, 0)
 }

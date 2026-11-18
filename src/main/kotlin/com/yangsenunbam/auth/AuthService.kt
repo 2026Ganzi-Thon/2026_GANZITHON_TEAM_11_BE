@@ -2,7 +2,6 @@ package com.yangsenunbam.auth
 
 import com.yangsenunbam.common.ApiException
 import com.yangsenunbam.common.ErrorCode
-import com.yangsenunbam.common.notImplemented
 import com.yangsenunbam.security.CurrentUser
 import com.yangsenunbam.security.TokenService
 import org.springframework.dao.DuplicateKeyException
@@ -20,6 +19,7 @@ class AuthService(
     private val encoder: PasswordEncoder,
     private val tokens: TokenService,
     private val clock: Clock,
+    private val reset: PasswordResetService,
 ) {
     private fun normalizedEmail(raw: String): String = raw.trim().lowercase(Locale.ROOT)
 
@@ -32,6 +32,11 @@ class AuthService(
         }
         val parts = tokens.unseal(cached.encryptedResponse).split('\n')
         check(parts.size == 3) { "Stored authentication response is invalid" }
+        val session = store.findSessionByHash(tokens.fingerprint(parts[1]), lock = true)
+        if (session == null || session.revokedAtMillis != null || session.expiresAtMillis <= clock.millis()) {
+            throw ApiException(if (action == "refresh") ErrorCode.INVALID_REFRESH_TOKEN else ErrorCode.INVALID_CREDENTIALS,
+                "다시 로그인해 주세요.")
+        }
         return AuthResponse(parts[0], parts[1], expiresIn = parts[2].toLong())
     }
 
@@ -63,6 +68,7 @@ class AuthService(
         val email = normalizedEmail(request.email)
         val scope = "email:${tokens.keyedFingerprint(email)}"
         val fingerprint = tokens.keyedFingerprint("register\u0000$email\u0000${request.password}")
+        store.findUserByEmail(email)?.let { store.lockUser(it.id) }
         replay(scope, "register", idempotencyKey, fingerprint, now)?.let { return it }
 
         if (store.findUserByEmail(email) != null) {
@@ -82,44 +88,49 @@ class AuthService(
 
     @Transactional
     fun login(request: LoginRequest, idempotencyKey: String): AuthResponse {
-        val now = clock.millis()
         val email = normalizedEmail(request.email)
         val scope = "email:${tokens.keyedFingerprint(email)}"
         val fingerprint = tokens.keyedFingerprint("login\u0000$email\u0000${request.password}")
-        replay(scope, "login", idempotencyKey, fingerprint, now)?.let { return it }
-
-        val user = store.findUserByEmail(email)
-        if (user == null || !encoder.matches(request.password, user.passwordHash)) {
+        ensureKey(idempotencyKey)
+        val user = store.findUserByEmail(email)?.let { store.lockUser(it.id) }
+            ?: throw ApiException(ErrorCode.INVALID_CREDENTIALS, "이메일 또는 비밀번호를 확인해 주세요.")
+        val lockedNow = clock.millis()
+        replay(scope, "login", idempotencyKey, fingerprint, lockedNow)?.let { return it }
+        if (!encoder.matches(request.password, user.passwordHash)) {
             throw ApiException(ErrorCode.INVALID_CREDENTIALS, "이메일 또는 비밀번호를 확인해 주세요.")
         }
-        val response = createAuthResponse(user.id, now)
-        saveReplay(scope, "login", idempotencyKey, fingerprint, response, now)
+        val response = createAuthResponse(user.id, lockedNow)
+        saveReplay(scope, "login", idempotencyKey, fingerprint, response, lockedNow)
         return response
     }
 
     @Transactional
     fun refresh(request: RefreshTokenRequest, idempotencyKey: String): AuthResponse {
-        val now = clock.millis()
         val oldHash = tokens.fingerprint(request.refreshToken)
         val scope = "refresh:$oldHash"
         val fingerprint = tokens.keyedFingerprint("refresh\u0000$oldHash")
-        replay(scope, "refresh", idempotencyKey, fingerprint, now)?.let { return it }
-
-        val current = store.findSessionByHash(oldHash)
+        ensureKey(idempotencyKey)
+        val owner = store.findSessionByHash(oldHash)?.userId
             ?: throw ApiException(ErrorCode.INVALID_REFRESH_TOKEN, "다시 로그인해 주세요.")
-        if (current.revokedAtMillis != null || current.expiresAtMillis <= now ||
-            store.findUserById(current.userId) == null || !store.revokeSession(current.id, now)
+        store.lockUser(owner) ?: throw ApiException(ErrorCode.INVALID_REFRESH_TOKEN, "다시 로그인해 주세요.")
+        val lockedNow = clock.millis()
+        replay(scope, "refresh", idempotencyKey, fingerprint, lockedNow)?.let { return it }
+        val current = store.findSessionByHash(oldHash, lock = true)
+            ?: throw ApiException(ErrorCode.INVALID_REFRESH_TOKEN, "다시 로그인해 주세요.")
+        if (current.revokedAtMillis != null || current.expiresAtMillis <= lockedNow ||
+            current.userId != owner || !store.revokeSession(current.id, lockedNow)
         ) {
             throw ApiException(ErrorCode.INVALID_REFRESH_TOKEN, "다시 로그인해 주세요.")
         }
-        val response = createAuthResponse(current.userId, now)
-        saveReplay(scope, "refresh", idempotencyKey, fingerprint, response, now)
+        val response = createAuthResponse(current.userId, lockedNow)
+        saveReplay(scope, "refresh", idempotencyKey, fingerprint, response, lockedNow)
         return response
     }
 
     @Transactional
     fun logout(user: CurrentUser, request: RefreshTokenRequest) {
-        val session = store.findSessionByHash(tokens.fingerprint(request.refreshToken))
+        store.lockUser(user.id) ?: throw ApiException(ErrorCode.INVALID_REFRESH_TOKEN, "유효하지 않은 세션이에요.")
+        val session = store.findSessionByHash(tokens.fingerprint(request.refreshToken), lock = true)
             ?: throw ApiException(ErrorCode.INVALID_REFRESH_TOKEN, "유효하지 않은 세션이에요.")
         if (session.userId != user.id) {
             throw ApiException(ErrorCode.INVALID_REFRESH_TOKEN, "유효하지 않은 세션이에요.")
@@ -128,7 +139,6 @@ class AuthService(
         store.revokeSessionForUser(session.id, user.id, clock.millis())
     }
 
-    // Pending FE reset-URL and email delivery decisions (API v0.6 A-01).
-    fun requestPasswordReset(request: PasswordResetRequest): PasswordResetAccepted = notImplemented()
-    fun confirmPasswordReset(request: PasswordResetConfirmRequest): Unit = notImplemented()
+    fun requestPasswordReset(request: PasswordResetRequest): PasswordResetAccepted = reset.request(request)
+    fun confirmPasswordReset(request: PasswordResetConfirmRequest): Unit = reset.confirm(request)
 }

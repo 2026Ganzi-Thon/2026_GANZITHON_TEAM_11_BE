@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.MethodSource
 import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc
 import org.springframework.http.HttpMethod
@@ -22,7 +23,7 @@ import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandl
 @AutoConfigureMockMvc
 class ApiSkeletonTest {
     @Autowired lateinit var mvc: MockMvc
-    @Autowired lateinit var mappings: RequestMappingHandlerMapping
+    @Autowired @Qualifier("requestMappingHandlerMapping") lateinit var mappings: RequestMappingHandlerMapping
 
     @Test
     fun `all 47 specification endpoints are registered without extra product routes`() {
@@ -42,6 +43,14 @@ class ApiSkeletonTest {
             "PUT /me/day-intro", "PUT /me/birth-date", "PUT /me/reminder"
         )) return
         if (case.method == "POST" && case.path in setOf("/auth/register", "/auth/login", "/auth/refresh", "/auth/logout")) return
+        // BE1_REMAINING_IMPLEMENTED: real BE1 endpoints no longer return 501.
+        if ("${case.method} ${case.path}" in setOf(
+            "POST /auth/password-reset/request", "POST /auth/password-reset/confirm",
+            "GET /categories", "PUT /nights/current/worry",
+            "POST /nights/{night_id}/support/continue", "POST /nights/{night_id}/sessions",
+            "POST /sessions/{session_id}/finish", "PUT /nights/{night_id}/writing-offer",
+            "GET /me/worries", "DELETE /nights/{night_id}/worry", "DELETE /me"
+        )) return
         val path = case.path.replace(Regex("\\{[^}]+}"), "id")
         val request = request(HttpMethod.valueOf(case.method), "/api/v1$path").with(auth(admin = true))
         if (case.idempotent) request.header("Idempotency-Key", "request-1")
@@ -72,7 +81,7 @@ class ApiSkeletonTest {
         mvc.perform(get("/api/v1/me").with(auth(complete = false))).andExpect(status().isForbidden)
             .andExpect(jsonPath("$.error.code").value("ONBOARDING_REQUIRED"))
         mvc.perform(get("/api/v1/bootstrap").with(auth(complete = false))).andExpect(status().isNotFound)
-        mvc.perform(delete("/api/v1/me").with(auth(complete = false))).andExpect(status().isNotImplemented)
+        mvc.perform(delete("/api/v1/me").with(auth(complete = false))).andExpect(status().isNotFound)
     }
 
     @Test

@@ -51,6 +51,7 @@ class SecurityConfig(
             .requestCache { it.disable() }
             .sessionManagement { it.sessionCreationPolicy(SessionCreationPolicy.STATELESS) }
             .authorizeHttpRequests {
+                it.requestMatchers(HttpMethod.GET, "/actuator/health", "/actuator/health/liveness", "/actuator/health/readiness").permitAll()
                 it.requestMatchers(HttpMethod.POST, "/api/v1/auth/register", "/api/v1/auth/login", "/api/v1/auth/refresh",
                     "/api/v1/auth/password-reset/request", "/api/v1/auth/password-reset/confirm").permitAll()
                 it.requestMatchers(HttpMethod.GET, "/api/v1/legal-documents").permitAll()
