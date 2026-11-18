@@ -1,4 +1,9 @@
 spring:
+  profiles:
+    group:
+      prod: mysql
+  flyway:
+    enabled: false
   application:
     name: yangsenunbam
   jackson:
