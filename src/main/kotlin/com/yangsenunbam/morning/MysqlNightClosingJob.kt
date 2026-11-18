@@ -31,9 +31,10 @@ class MysqlNightClosingJob(
     @EventListener(ApplicationReadyEvent::class)
     @Scheduled(fixedDelay = 60_000, initialDelay = 60_000)
     fun closeOverdue() {
-        val nights = jdbc.query("""SELECT id, user_id FROM night_records
-            WHERE closes_at_ms <= ? AND default_frozen = FALSE ORDER BY closes_at_ms, id LIMIT 100""",
-            RowMapper { rs, _ -> rs.getString("id") to rs.getString("user_id") }, time.now().toEpochMilli())
+        val nights = jdbc.query("""SELECT n.id, n.user_id FROM be1_nights n
+            LEFT JOIN night_feed_state f ON f.night_id = n.id
+            WHERE n.night_date < ? AND COALESCE(f.default_frozen, FALSE) = FALSE ORDER BY n.night_date, n.id LIMIT 100""",
+            RowMapper { rs, _ -> rs.getString("id") to rs.getString("user_id") }, time.fortuneDate())
         nights.forEach { (nightId, userId) ->
             try {
                 store.withUser(userId) { tx -> finalizer.finalize(tx, tx.ownedNight(userId, nightId)) }

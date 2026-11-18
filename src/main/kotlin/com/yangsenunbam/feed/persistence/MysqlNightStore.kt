@@ -1,6 +1,7 @@
 package com.yangsenunbam.feed.persistence
 
 import com.yangsenunbam.common.*
+import com.yangsenunbam.feed.NightTime
 import com.yangsenunbam.feed.ProgressRequest
 import com.yangsenunbam.feed.model.*
 import com.yangsenunbam.feed.port.*
@@ -9,7 +10,6 @@ import com.yangsenunbam.flock.SheepResponse
 import com.yangsenunbam.morning.ReflectionResponse
 import com.yangsenunbam.session.SessionResponse
 import org.springframework.context.annotation.Profile
-import org.springframework.dao.DuplicateKeyException
 import org.springframework.dao.PessimisticLockingFailureException
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.RowMapper
@@ -22,6 +22,7 @@ import org.springframework.transaction.support.TransactionTemplate
 import tools.jackson.databind.json.JsonMapper
 import java.security.MessageDigest
 import java.sql.ResultSet
+import java.time.Instant
 import java.time.LocalDate
 
 @Repository
@@ -50,49 +51,34 @@ class MysqlNightStore(
         }
     }
 
-    /** BE1에서 고민/지원 상태 검증을 마친 뒤 같은 트랜잭션으로 호출한다. */
-    fun createNight(night: NightRecord) = withUser(night.userId) {
-        jdbc.update("""INSERT INTO night_records
-            (id, user_id, night_date, closes_at_ms, category_id, worry_text, worry_saved_at_ms, writing_state)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)""", night.id, night.userId, night.nightDate, night.closesAt.toEpochMilli(),
-            night.categoryId.value, night.worryText, night.worrySavedAt?.toEpochMilli(), night.writingState?.value)
-        Unit
-    }
-
-    /** BE1 세션 생성에서 FeedBuilder 결과와 함께 저장한다. 활성 세션 고유 제약을 DB에서도 검사한다. */
-    fun createSession(session: FeedSession) = withUser(session.userId) { tx ->
-        val state = session.state
-        val night = tx.ownedNight(session.userId, state.nightId)
-        require(state.closesAt == night.closesAt)
-        require(state.status == SessionStatus.ACTIVE && state.position == 0 && state.furthestPosition == 0 && state.sequence == 0L)
-        try {
-            jdbc.update("""INSERT INTO feed_sessions
-                (id, night_id, user_id, status, sheep_count, feed_version, started_at_ms, closes_at_ms, writer_epoch)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""", state.id, state.nightId, session.userId, state.status.value,
-                state.sheepCount, state.feedVersion, state.startedAt.toEpochMilli(), state.closesAt.toEpochMilli(), state.writerEpoch)
-        } catch (ex: DuplicateKeyException) {
-            throw ApiException(ErrorCode.ACTIVE_SESSION_EXISTS, "이미 진행 중인 세션이 있습니다.")
-        }
-        session.items.forEach { item ->
+    /** BE1이 방금 생성한 세션의 피드를 같은 트랜잭션에 저장한다. */
+    fun saveFeed(sessionId: String, items: List<StoredFeedItem>) {
+        check(TransactionSynchronizationManager.isActualTransactionActive())
+        items.forEach { item ->
             jdbc.update("INSERT INTO feed_items(id, session_id, position, card_id, pause_kind) VALUES (?, ?, ?, ?, ?)",
-                item.id, state.id, item.position, (item as? StoredCard)?.cardId, (item as? StoredPause)?.kind?.value)
+                item.id, sessionId, item.position, (item as? StoredCard)?.cardId, (item as? StoredPause)?.kind?.value)
         }
     }
 
     private inner class Transaction(private val userId: String) : NightTransaction {
-        override fun night(id: String) = jdbc.first("SELECT * FROM night_records WHERE id = ? AND user_id = ?", id, userId) { nightRow(it) }
-        override fun nightOn(date: LocalDate) = jdbc.first("SELECT * FROM night_records WHERE night_date = ? AND user_id = ?", date, userId) { nightRow(it) }
-        override fun session(id: String) = jdbc.first("SELECT * FROM feed_sessions WHERE id = ? AND user_id = ?", id, userId) { sessionRow(it) }
-        override fun sessions(nightId: String) = jdbc.query("SELECT * FROM feed_sessions WHERE night_id = ? AND user_id = ? ORDER BY started_at_ms, id",
+        override fun night(id: String) = jdbc.first("$nightSelect WHERE n.id = ? AND n.user_id = ?", id, userId) { nightRow(it) }
+        override fun nightOn(date: LocalDate) = jdbc.first("$nightSelect WHERE n.night_date = ? AND n.user_id = ?", date, userId) { nightRow(it) }
+        override fun session(id: String) = jdbc.first("$sessionSelect WHERE s.id = ? AND s.user_id = ? FOR UPDATE OF s", id, userId) { sessionRow(it) }
+        override fun sessions(nightId: String) = jdbc.query(
+            "$sessionSelect WHERE s.night_id = ? AND s.user_id = ? ORDER BY s.started_at_ms, s.id FOR UPDATE OF s",
             RowMapper { rs, _ -> sessionRow(rs) }, nightId, userId)
 
         override fun saveNight(night: NightRecord) {
-            ownedNight(userId, night.id)
-            // 고민 원문/저장 시각/카테고리는 BE1 소유이므로 스냅샷 값으로 덮어쓰지 않는다.
-            jdbc.update("""UPDATE night_records SET writing_state = ?, view_sequence = ?, default_frozen = ?,
-                default_card_id = ?, reflection_answer = ?, reflection_message = ? WHERE id = ? AND user_id = ?""",
-                night.writingState?.value, night.viewSequence, night.defaultFrozen, night.defaultCardId,
-                night.reflection?.answer?.value, night.reflection?.message, night.id, userId)
+            val current = ownedNight(userId, night.id)
+            if (night.writingState == WritingState.DEFERRED && current.writingState in setOf(WritingState.OFFERED, WritingState.WRITING)) {
+                jdbc.update("UPDATE be1_nights SET writing_state = ? WHERE id = ? AND user_id = ?",
+                    WritingState.DEFERRED.value, night.id, userId)
+            }
+            val state = arrayOf<Any?>(night.viewSequence, night.defaultFrozen, night.defaultCardId, night.reflection?.answer?.value, night.reflection?.message)
+            jdbc.update("""INSERT INTO night_feed_state
+                (night_id, view_sequence, default_frozen, default_card_id, reflection_answer, reflection_message)
+                VALUES (?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE view_sequence = ?, default_frozen = ?,
+                default_card_id = ?, reflection_answer = ?, reflection_message = ?""", night.id, *state, *state)
             night.reactions.forEach { (cardId, reaction) ->
                 jdbc.update("""INSERT INTO night_reactions(night_id, card_id, fluff_saved, song_saved_at_ms) VALUES (?, ?, ?, ?)
                     ON DUPLICATE KEY UPDATE fluff_saved = ?, song_saved_at_ms = ?""", night.id, cardId, reaction.fluffSaved,
@@ -114,13 +100,17 @@ class MysqlNightStore(
         }
 
         override fun saveSession(session: FeedSession) {
-            ownedSession(userId, session.state.id)
             val state = session.state
-            jdbc.update("""UPDATE feed_sessions SET status = ?, position = ?, furthest_position = ?, sequence = ?, writer_epoch = ?,
-                last_request_position = ?, last_request_furthest = ?, closing_card_id = ?, closing_viewed_at_ms = ?
-                WHERE id = ? AND user_id = ?""", state.status.value, state.position, state.furthestPosition, state.sequence, state.writerEpoch,
-                session.lastProgress?.position, session.lastProgress?.furthestPosition, session.closingCardId,
-                session.closingViewedAt?.toEpochMilli(), state.id, userId)
+            val entrusted = session.items.filterIsInstance<StoredPause>().count { it.action == PauseAction.ENTRUSTED }
+            jdbc.update("""UPDATE be1_sessions SET status = ?, position = ?, furthest_position = ?, sequence = ?,
+                writer_epoch = ?, closing_viewed_at_ms = ?, entrusted_count = ? WHERE id = ? AND user_id = ?""",
+                state.status.value, state.position, state.furthestPosition, state.sequence, state.writerEpoch,
+                session.closingViewedAt?.toEpochMilli(), entrusted, state.id, userId)
+            val progress = arrayOf<Any?>(state.furthestPosition, state.sequence, session.lastProgress?.position, session.lastProgress?.furthestPosition)
+            jdbc.update("""INSERT INTO feed_session_progress
+                (session_id, recorded_furthest, recorded_sequence, last_request_position, last_request_furthest)
+                VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE recorded_furthest = ?, recorded_sequence = ?,
+                last_request_position = ?, last_request_furthest = ?""", state.id, *progress, *progress)
             session.items.filterIsInstance<StoredPause>().forEach {
                 jdbc.update("UPDATE feed_items SET pause_action = ? WHERE id = ? AND session_id = ?", it.action?.value, it.id, state.id)
             }
@@ -160,8 +150,11 @@ class MysqlNightStore(
                 AdoptionRecord(SheepResponse(row.getString("id"), id, row.getDate("night_date").toLocalDate(), row.getString("card_id"),
                     row.getString("color_key"), row.instant("created_at_ms"), placements, row.getInt("version")), row.optionalInt("position"), row.getInt("sheep_count"))
             }
-            return NightRecord(id, userId, rs.getDate("night_date").toLocalDate(), rs.instant("closes_at_ms"), wire(rs.getString("category_id")),
-                rs.getString("worry_text"), rs.optionalInstant("worry_saved_at_ms"), rs.getString("writing_state")?.let { wire<WritingState>(it) },
+            val date = rs.getDate("night_date").toLocalDate()
+            val closesAt = date.plusDays(1).atTime(4, 0).atZone(NightTime.SEOUL).toInstant()
+            val worry = rs.getString("worry_text")
+            return NightRecord(id, userId, date, closesAt, wire(rs.getString("category_id")),
+                worry, rs.optionalInstant("worry_saved_at_ms").takeIf { worry != null }, rs.getString("writing_state")?.let { wire<WritingState>(it) },
                 rs.getLong("view_sequence"), reactions, rs.getBoolean("default_frozen"), rs.getString("default_card_id"), adoption,
                 rs.getString("reflection_answer")?.let { ReflectionResponse(wire(it), rs.getString("reflection_message")) })
         }
@@ -177,15 +170,44 @@ class MysqlNightStore(
                 else StoredPause(row.getString("id"), row.getInt("position"), wire(row.getString("pause_kind")),
                     row.getString("pause_action")?.let { wire<PauseAction>(it) })
             }, id)
+            if (items.size != state.sheepCount) {
+                throw ApiException(ErrorCode.FEED_BUILD_UNAVAILABLE, "세션에 저장된 피드를 찾을 수 없어요.")
+            }
             val views = jdbc.query("SELECT * FROM feed_card_views WHERE session_id = ?", RowMapper { row, _ ->
                 CardView(row.getString("card_id"), id, row.optionalInt("position"), row.getInt("sheep_count"), row.instant("viewed_at_ms"), row.getLong("view_order"))
             }, id).associateBy { it.cardId }
+            val recordedSequence = rs.getLong("recorded_sequence")
             val last = rs.optionalInt("last_request_position")?.let {
-                ProgressRequest(it, rs.getInt("last_request_furthest"), state.sequence, state.writerEpoch)
+                ProgressRequest(it, rs.getInt("last_request_furthest"), recordedSequence, state.writerEpoch)
             }
-            return FeedSession(state, userId, items, last, views, rs.getString("closing_card_id"), rs.optionalInstant("closing_viewed_at_ms"))
+            val closingCardId = rs.getString("closing_card_json")?.let { mapper.readTree(it).path("id").asString() }
+            val finishedAt = rs.optionalInstant("finished_at_ms")
+            val currentViews = if (finishedAt != null && state.sequence > recordedSequence) {
+                finishedViews(state, items, views, rs.getInt("recorded_furthest"), finishedAt)
+            } else views
+            return FeedSession(state, userId, items, last, currentViews, closingCardId, rs.optionalInstant("closing_viewed_at_ms"))
         }
     }
+
+    /** BE1 finish may carry a final progress update that never went through /progress. */
+    private fun finishedViews(
+        state: SessionResponse, items: List<StoredFeedItem>, views: Map<String, CardView>,
+        previousFurthest: Int, finishedAt: Instant,
+    ): Map<String, CardView> {
+        val displayed = items.singleOrNull { it.position == state.position }
+        val newlyReached = items.filter { it.position in (previousFurthest + 1)..state.furthestPosition && it != displayed }
+        val result = views.toMutableMap()
+        var order = views.values.maxOfOrNull { it.order } ?: 0
+        (newlyReached + listOfNotNull(displayed)).filterIsInstance<StoredCard>().forEach { item ->
+            result[item.cardId] = CardView(item.cardId, state.id, item.position, state.sheepCount, finishedAt, ++order)
+        }
+        return result
+    }
+
+    private val nightSelect = """SELECT n.*, f.view_sequence, f.default_frozen, f.default_card_id,
+        f.reflection_answer, f.reflection_message FROM be1_nights n LEFT JOIN night_feed_state f ON f.night_id = n.id"""
+    private val sessionSelect = """SELECT s.*, p.recorded_furthest, p.recorded_sequence,
+        p.last_request_position, p.last_request_furthest FROM be1_sessions s LEFT JOIN feed_session_progress p ON p.session_id = s.id"""
 
     private data class Value<T>(val value: T)
     private fun hash(key: String): String = MessageDigest.getInstance("SHA-256").digest(key.toByteArray(Charsets.UTF_8))

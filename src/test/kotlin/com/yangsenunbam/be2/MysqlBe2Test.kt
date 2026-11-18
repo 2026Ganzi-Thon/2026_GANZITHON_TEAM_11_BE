@@ -8,6 +8,10 @@ import com.yangsenunbam.feed.persistence.*
 import com.yangsenunbam.fortune.*
 import com.yangsenunbam.fortune.persistence.MysqlFortunePort
 import com.yangsenunbam.morning.*
+import com.yangsenunbam.session.*
+import com.yangsenunbam.night.NightStore as Be1NightStore
+import com.yangsenunbam.night.NightRecord as Be1NightRecord
+import java.util.UUID
 import com.yangsenunbam.security.CurrentUser
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.*
@@ -18,11 +22,9 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Import
 import org.springframework.context.annotation.Primary
-import org.springframework.core.io.ClassPathResource
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.http.MediaType
 import org.springframework.jdbc.core.JdbcTemplate
-import org.springframework.jdbc.datasource.init.ScriptUtils
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
@@ -47,7 +49,9 @@ class MysqlBe2Test {
     @Autowired lateinit var jdbc: JdbcTemplate
     @Autowired lateinit var store: MysqlNightStore
     @Autowired lateinit var cards: MysqlCardCatalog
-    @Autowired lateinit var writer: MysqlSessionWriter
+    @Autowired lateinit var be1Sessions: SessionService
+    @Autowired lateinit var be1SessionStore: SessionStore
+    @Autowired lateinit var be1Nights: Be1NightStore
     @Autowired lateinit var feed: FeedService
     @Autowired lateinit var morning: MorningService
     @Autowired lateinit var fortune: FortuneService
@@ -62,11 +66,15 @@ class MysqlBe2Test {
 
     @BeforeEach
     fun seed() {
-        jdbc.dataSource!!.connection.use { ScriptUtils.executeSqlScript(it, ClassPathResource("mysql/be1-contract.sql")) }
-        // MYSQL_TEST_URL은 아래 검증에서 *_test DB로 제한한다.
-        listOf("feed_resume_receipts", "adopted_sheep", "night_reactions", "feed_card_views", "feed_items", "feed_sessions",
-            "night_records", "feed_card_yarn", "feed_card_history", "feed_card_catalog", "fortune_results",
-            "fortune_approved_daily", "fortune_approved_templates", "user_onboarding", "auth_users").forEach { jdbc.update("DELETE FROM $it") }
+        // The test task targets a disposable *_test schema. BE1 tests use their own account IDs.
+        listOf("feed_resume_receipts", "adopted_sheep", "night_reactions", "feed_card_views", "feed_items", "feed_session_progress",
+            "night_feed_state", "feed_card_yarn", "feed_card_history", "feed_card_catalog", "fortune_results",
+            "fortune_approved_daily", "fortune_approved_templates").forEach { jdbc.update("DELETE FROM $it") }
+        jdbc.update("DELETE FROM be1_session_replays WHERE user_id IN ('user-1', 'user-2')")
+        jdbc.update("DELETE FROM be1_sessions WHERE user_id IN ('user-1', 'user-2')")
+        jdbc.update("DELETE FROM be1_nights WHERE user_id IN ('user-1', 'user-2')")
+        jdbc.update("DELETE FROM user_onboarding WHERE user_id IN ('user-1', 'user-2')")
+        jdbc.update("DELETE FROM auth_users WHERE id IN ('user-1', 'user-2')")
         jdbc.update("UPDATE feed_category_colors SET color_key = NULL WHERE category_id <> 'none'")
         for (id in listOf("user-1", "user-2")) {
             jdbc.update("INSERT INTO auth_users(id, email, password_hash, onboarding_complete, created_at_ms) VALUES (?, ?, ?, TRUE, ?)",
@@ -76,8 +84,15 @@ class MysqlBe2Test {
         val fixture = Be2Fixture()
         clock.current = fixture.clock.current
         fixture.store.cards.values.forEach { cards.publishApproved(it, "user-2", clock.current.minusSeconds(3600)) }
-        store.createNight(fixture.store.nights.getValue("n1").copy(worryText = "내일 면접이 걱정돼요 🐑"))
-        store.createSession(fixture.store.sessions.getValue("s1"))
+        val night = fixture.store.nights.getValue("n1")
+        be1Nights.create(Be1NightRecord("n1", user.id, night.nightDate, night.categoryId, "내일 면접이 걱정돼요 🐑",
+            night.worrySavedAt!!.toEpochMilli(), false, false, null, null, null))
+        be1Nights.writingState("n1", WritingState.OFFERED)
+        store.withUser(user.id) {
+            val session = fixture.store.sessions.getValue("s1")
+            be1SessionStore.create(user.id, "n1", 7, 1, session.state.startedAt.toEpochMilli(), close.toEpochMilli(), "s1")
+            store.saveFeed("s1", session.items)
+        }
     }
 
     @Test
@@ -109,7 +124,7 @@ class MysqlBe2Test {
         feed.resume(user, "s1", "different-key")
         clock.current = close
         assertThat(feed.resume(user, "s1", "same-key")).isEqualTo(responses.first())
-        assertThat(jdbc.queryForObject("SELECT writer_epoch FROM feed_sessions WHERE id = 's1'", Long::class.java)).isEqualTo(3)
+        assertThat(jdbc.queryForObject("SELECT writer_epoch FROM be1_sessions WHERE id = 's1'", Long::class.java)).isEqualTo(3)
     }
 
     @Test
@@ -141,25 +156,25 @@ class MysqlBe2Test {
 
     @Test
     fun `card and feed creation roll back when source is unavailable or an active session exists`() {
-        fails(ErrorCode.ACTIVE_SESSION_EXISTS) { writer.create(user.id, "n1", "s2", 7) }
-        assertThat(count("feed_sessions")).isEqualTo(1)
+        fails(ErrorCode.ACTIVE_SESSION_EXISTS) { be1Sessions.create(user, "n1", CreateSessionRequest(7), "create-second") }
+        assertThat(sessionCount()).isEqualTo(1)
         assertThat(count("feed_items")).isEqualTo(7)
         endSession()
         cards.remove("s1-c7", clock.current)
-        fails(ErrorCode.FEED_BUILD_UNAVAILABLE) { writer.create(user.id, "n1", "s2", 7) }
-        assertThat(count("feed_sessions")).isEqualTo(1)
+        fails(ErrorCode.FEED_BUILD_UNAVAILABLE) { be1Sessions.create(user, "n1", CreateSessionRequest(7), "create-second") }
+        assertThat(sessionCount()).isEqualTo(1)
     }
 
     @Test
     fun `approved catalog supplies a persistent ordered feed and hides removed content`() {
         endSession()
-        val state = writer.create(user.id, "n1", "s2", 16)
+        val state = be1Sessions.create(user, "n1", CreateSessionRequest(16), "create-second")
         val result = feed.feed(user, state.id)
         assertThat(result.items.map { it.position }).containsExactlyElementsOf((1..16).toList())
         assertThat(result.items.filterIsInstance<PauseFeedItem>().map { it.position }).containsExactly(6, 14)
         assertThat(result.items.filterIsInstance<CardFeedItem>().count { it.card.kind == CardKind.SONG }).isEqualTo(2)
         cards.remove("s1-c7", clock.current)
-        assertThat((feed.feed(user, "s2").items.last() as CardFeedItem).card.content).isNull()
+        assertThat((feed.feed(user, state.id).items.last() as CardFeedItem).card.content).isNull()
         assertThat(jdbc.queryForObject("SELECT content_json IS NULL FROM feed_card_catalog WHERE id = 's1-c7'", Boolean::class.java)).isTrue()
         assertThat(count("feed_card_history")).isEqualTo(7)
     }
@@ -190,7 +205,7 @@ class MysqlBe2Test {
         assertThat(result.candidateCards.single { it.card.id == "s1-c7" }.canAdopt).isFalse()
         fails(ErrorCode.CARD_UNAVAILABLE) { morning.adopt(user, "n1", AdoptionRequest(null)) }
         assertThat(morning.morning(user, null).defaultCardId).isEqualTo("s1-c7")
-        assertThat(jdbc.queryForObject("SELECT status FROM feed_sessions WHERE id = 's1'", String::class.java)).isEqualTo("expired")
+        assertThat(jdbc.queryForObject("SELECT status FROM be1_sessions WHERE id = 's1'", String::class.java)).isEqualTo("expired")
     }
 
     @Test
@@ -243,11 +258,7 @@ class MysqlBe2Test {
     }
 
     @Test
-    fun `database unique keys protect one sheep per night and one active session`() {
-        assertThrows<DataIntegrityViolationException> {
-            jdbc.update("""INSERT INTO feed_sessions(id, night_id, user_id, status, sheep_count, feed_version, started_at_ms, closes_at_ms)
-                VALUES ('duplicate', 'n1', 'user-1', 'active', 7, 1, 0, 1)""")
-        }
+    fun `database unique key protects one sheep per night`() {
         progress(7)
         clock.current = close
         morning.adopt(user, "n1", AdoptionRequest(null))
@@ -271,7 +282,7 @@ class MysqlBe2Test {
     @Test
     fun `deleted worry stays deleted when BE2 writes reflection or reactions`() {
         progress(3)
-        jdbc.update("UPDATE night_records SET worry_text = NULL, worry_saved_at_ms = NULL WHERE id = 'n1'")
+        jdbc.update("UPDATE be1_nights SET worry_text = NULL, worry_deleted = TRUE WHERE id = 'n1'")
         feed.saveFluff(user, "n1", "s1-c1", SaveRequest(true))
         clock.current = close
         fails(ErrorCode.REFLECTION_NOT_AVAILABLE) { morning.reflect(user, "n1", ReflectionRequest(ReflectionAnswer.SMALLER)) }
@@ -328,11 +339,58 @@ class MysqlBe2Test {
             .andExpect(jsonPath("$.zodiac").value("gemini"))
     }
 
+    @Test
+    fun `BE1 bearer flow uses one session through BE2 feed progress finish and adoption`() {
+        clock.current = close.minusSeconds(60)
+        val registration = mvc.perform(post("/api/v1/auth/register")
+            .header("Idempotency-Key", "register-${UUID.randomUUID()}")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("""{"email":"integration-${UUID.randomUUID()}@example.test","password":"FixturePass123!"}"""))
+            .andExpect(status().isCreated).andReturn()
+        val token = mapper.readTree(registration.response.contentAsString).path("access_token").asString()
+        fun putWithToken(path: String, body: String) = mvc.perform(put("/api/v1$path")
+            .header("Authorization", "Bearer $token").contentType(MediaType.APPLICATION_JSON).content(body))
+        fun getWithToken(path: String) = mvc.perform(get("/api/v1$path").header("Authorization", "Bearer $token"))
+        fun postWithToken(path: String, key: String, body: String? = null) = mvc.perform(post("/api/v1$path")
+            .header("Authorization", "Bearer $token").header("Idempotency-Key", key).also {
+                if (body != null) it.contentType(MediaType.APPLICATION_JSON).content(body)
+            })
+
+        putWithToken("/me/consents", """{"terms_version":"test-1","privacy_version":"test-1","terms_accepted":true,"privacy_accepted":true}""")
+            .andExpect(status().isNoContent)
+        putWithToken("/me/birth-date", """{"birth_date":"2000-06-01"}""").andExpect(status().isOk)
+        putWithToken("/me/day-intro", """{"acknowledged":true}""").andExpect(status().isNoContent)
+        val night = putWithToken("/nights/current/worry", """{"category_id":"none","worry_text":null}""")
+            .andExpect(status().isOk).andReturn()
+        val nightId = mapper.readTree(night.response.contentAsString).path("id").asString()
+        val session = postWithToken("/nights/$nightId/sessions", "start", """{"sheep_count":3}""")
+            .andExpect(status().isCreated).andReturn()
+        val sessionId = mapper.readTree(session.response.contentAsString).path("id").asString()
+        getWithToken("/sessions/$sessionId/feed").andExpect(status().isOk).andExpect(jsonPath("$.total_count").value(3))
+        postWithToken("/sessions/$sessionId/resume", "resume").andExpect(status().isOk).andExpect(jsonPath("$.writer_epoch").value(2))
+        putWithToken("/sessions/$sessionId/progress", """{"position":1,"furthest_position":1,"sequence":1,"writer_epoch":2}""")
+            .andExpect(status().isOk)
+        assertThat(jdbc.queryForObject("SELECT position FROM be1_sessions WHERE id = ?", Int::class.java, sessionId)).isEqualTo(1)
+        postWithToken("/sessions/$sessionId/finish", "finish",
+            """{"reason":"completed","position":3,"furthest_position":3,"sequence":2,"writer_epoch":2}""")
+            .andExpect(status().isOk).andExpect(jsonPath("$.closing_card.id").value("s1-c7"))
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM be1_sessions WHERE night_id = ?", Int::class.java, nightId)).isEqualTo(1)
+
+        clock.current = close
+        getWithToken("/bootstrap").andExpect(status().isOk).andExpect(jsonPath("$.next_screen").value("MORNING_ADOPTION"))
+        getWithToken("/morning").andExpect(status().isOk)
+            .andExpect(jsonPath("$.counted_sheep").value(3)).andExpect(jsonPath("$.default_card_id").value("s1-c7"))
+        putWithToken("/nights/$nightId/adoption", """{"card_id":null}""")
+            .andExpect(status().isOk).andExpect(jsonPath("$.card_id").value("s1-c7"))
+    }
+
     private fun progress(position: Int, furthest: Int = position, sequence: Long = 1) = feed.saveProgress(user, "s1", ProgressRequest(position, furthest, sequence, 1))
     private fun count(table: String) = jdbc.queryForObject("SELECT COUNT(*) FROM $table", Int::class.java)!!
-    private fun endSession() = store.withUser(user.id) { tx ->
-        val session = tx.session("s1")!!
-        tx.saveSession(session.copy(state = session.state.copy(status = SessionStatus.STOPPED), closingCardId = "s1-c7"))
+    private fun sessionCount() = jdbc.queryForObject("SELECT COUNT(*) FROM be1_sessions WHERE user_id = ?", Int::class.java, user.id)!!
+    private fun endSession() {
+        val state = be1SessionStore.owned(user.id, "s1")
+        be1Sessions.finish(user, "s1", FinishRequest(FinishReason.LEAVE, maxOf(1, state.position),
+            maxOf(1, state.furthestPosition), state.sequence + 1, state.writerEpoch), "finish-s1")
     }
     private fun template() { jdbc.update("""INSERT INTO fortune_approved_templates
         (zodiac, sheep_type, message, lucky_color, lucky_item, small_action) VALUES ('gemini', 'relaxed', '검수된 테스트 문구', '보라', '책', '산책')""") }
@@ -348,7 +406,7 @@ class MysqlBe2Test {
 
     companion object {
         private val externalUrl = System.getenv("MYSQL_TEST_URL")?.also {
-            require(it.startsWith("jdbc:mysql://") && it.substringAfterLast('/').substringBefore('?').endsWith("_test")) {
+            require(Regex("jdbc:mysql://(?:localhost|127\\.0\\.0\\.1):[0-9]+/[A-Za-z0-9_]+_test(?:\\?.*)?").matches(it)) {
                 "MYSQL_TEST_URL must point to a disposable MySQL database named *_test"
             }
         }

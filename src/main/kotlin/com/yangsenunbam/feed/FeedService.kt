@@ -76,7 +76,8 @@ class FeedService(private val store: NightStore, private val time: NightTime) {
             val now = time.now()
             // completed의 마지막 카드는 진행 저장 때 이미 기록한 칸을 유지한다.
             val position = if (session.state.status == SessionStatus.COMPLETED) session.state.sheepCount else null
-            val view = CardView(cardId, sessionId, position, session.state.sheepCount, now, night.viewSequence + 1)
+            val latestOrder = maxOf(night.viewSequence, session.views.values.maxOfOrNull { it.order } ?: 0)
+            val view = CardView(cardId, sessionId, position, session.state.sheepCount, now, latestOrder + 1)
             tx.saveSession(session.copy(closingViewedAt = now, views = session.views + (cardId to view)))
             tx.saveNight(night.copy(viewSequence = view.order))
         }

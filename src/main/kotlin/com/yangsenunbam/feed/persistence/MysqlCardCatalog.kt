@@ -56,6 +56,10 @@ class MysqlCardCatalog(private val jdbc: JdbcTemplate, private val mapper: JsonM
         return card.copy(viewer = card.viewer.copy(yarnSent = sent))
     }
 
+    fun lockAvailable(cardId: String): Boolean = jdbc.first(
+        "SELECT available FROM feed_card_catalog WHERE id = ? FOR SHARE", cardId,
+    ) { it.getBoolean("available") } == true
+
     fun at(cardId: String, instant: Instant): CardAvailability = jdbc.first(
         "SELECT available, tone FROM feed_card_history WHERE card_id = ? AND changed_at_ms <= ? ORDER BY changed_at_ms DESC LIMIT 1",
         cardId, instant.toEpochMilli(),

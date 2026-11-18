@@ -96,7 +96,7 @@ class Be2HttpTest {
     @TestConfiguration(proxyBeanMethods = false)
     class Adapters {
         @Bean fun fixture() = Be2Fixture()
-        @Bean @Primary fun nightStore(fixture: Be2Fixture): NightStore = fixture.store
+        @Bean @Primary fun testFeedNightStore(fixture: Be2Fixture): NightStore = fixture.store
         @Bean @Primary fun testClock(fixture: Be2Fixture): Clock = fixture.clock
         @Bean @Primary fun fortunes() = MemoryFortunePort()
     }

@@ -1,21 +1,21 @@
--- auth_users/user_onboarding은 BE1 소유다. 이 마이그레이션은 해당 테이블을 변경하지 않는다.
--- BE1이 밤/세션을 생성할 때 MysqlNightStore의 생성 메서드를 같은 트랜잭션에서 사용한다.
-CREATE TABLE night_records (
-    id VARCHAR(64) COLLATE utf8mb4_bin PRIMARY KEY,
-    user_id VARCHAR(36) COLLATE utf8mb4_bin NOT NULL,
-    night_date DATE NOT NULL,
-    closes_at_ms BIGINT NOT NULL,
-    category_id VARCHAR(20) NOT NULL,
-    worry_text TEXT NULL,
-    worry_saved_at_ms BIGINT NULL,
-    writing_state VARCHAR(20) NULL,
+-- BE1 migration V1 owns night/session rows. BE2 stores only its additional state here.
+CREATE TABLE night_feed_state (
+    night_id VARCHAR(36) COLLATE utf8mb4_bin PRIMARY KEY,
     view_sequence BIGINT NOT NULL DEFAULT 0,
     default_frozen BOOLEAN NOT NULL DEFAULT FALSE,
     default_card_id VARCHAR(64) COLLATE utf8mb4_bin NULL,
     reflection_answer VARCHAR(20) NULL,
     reflection_message VARCHAR(255) NULL,
-    UNIQUE KEY uk_night_user_date (user_id, night_date),
-    INDEX ix_night_closing (default_frozen, closes_at_ms, id)
+    CONSTRAINT fk_night_feed_state FOREIGN KEY (night_id) REFERENCES be1_nights(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE feed_session_progress (
+    session_id VARCHAR(36) COLLATE utf8mb4_bin PRIMARY KEY,
+    recorded_furthest INT NOT NULL,
+    recorded_sequence BIGINT NOT NULL,
+    last_request_position INT NULL,
+    last_request_furthest INT NULL,
+    CONSTRAINT fk_feed_session_progress FOREIGN KEY (session_id) REFERENCES be1_sessions(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE feed_card_catalog (
@@ -49,44 +49,15 @@ CREATE TABLE feed_card_yarn (
     CONSTRAINT fk_feed_yarn_card FOREIGN KEY (card_id) REFERENCES feed_card_catalog(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-CREATE TABLE feed_sessions (
-    id VARCHAR(64) COLLATE utf8mb4_bin PRIMARY KEY,
-    night_id VARCHAR(64) COLLATE utf8mb4_bin NOT NULL,
-    user_id VARCHAR(36) COLLATE utf8mb4_bin NOT NULL,
-    status VARCHAR(20) NOT NULL,
-    sheep_count INT NOT NULL,
-    feed_version INT NOT NULL,
-    position INT NOT NULL DEFAULT 0,
-    furthest_position INT NOT NULL DEFAULT 0,
-    sequence BIGINT NOT NULL DEFAULT 0,
-    writer_epoch BIGINT NOT NULL DEFAULT 1,
-    last_request_position INT NULL,
-    last_request_furthest INT NULL,
-    started_at_ms BIGINT NOT NULL,
-    closes_at_ms BIGINT NOT NULL,
-    closing_card_id VARCHAR(64) COLLATE utf8mb4_bin NULL,
-    closing_viewed_at_ms BIGINT NULL,
-    active_night_id VARCHAR(64) COLLATE utf8mb4_bin
-        GENERATED ALWAYS AS (CASE WHEN status = 'active' THEN night_id ELSE NULL END) STORED,
-    UNIQUE KEY uk_active_night (active_night_id),
-    INDEX ix_session_night (night_id),
-    CONSTRAINT fk_session_night FOREIGN KEY (night_id) REFERENCES night_records(id),
-    CONSTRAINT fk_closing_card FOREIGN KEY (closing_card_id) REFERENCES feed_card_catalog(id),
-    CHECK (status IN ('active', 'completed', 'stopped', 'expired')),
-    CHECK (sheep_count BETWEEN 3 AND 30),
-    CHECK (position >= 0 AND position <= furthest_position AND furthest_position <= sheep_count),
-    CHECK (sequence >= 0 AND writer_epoch >= 1)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
 CREATE TABLE feed_items (
     id VARCHAR(64) COLLATE utf8mb4_bin PRIMARY KEY,
-    session_id VARCHAR(64) COLLATE utf8mb4_bin NOT NULL,
+    session_id VARCHAR(36) COLLATE utf8mb4_bin NOT NULL,
     position INT NOT NULL,
     card_id VARCHAR(64) COLLATE utf8mb4_bin NULL,
     pause_kind VARCHAR(20) NULL,
     pause_action VARCHAR(20) NULL,
     UNIQUE KEY uk_feed_position (session_id, position),
-    CONSTRAINT fk_item_session FOREIGN KEY (session_id) REFERENCES feed_sessions(id),
+    CONSTRAINT fk_item_session FOREIGN KEY (session_id) REFERENCES be1_sessions(id) ON DELETE CASCADE,
     CONSTRAINT fk_item_card FOREIGN KEY (card_id) REFERENCES feed_card_catalog(id),
     CHECK (position BETWEEN 1 AND 30),
     CHECK ((card_id IS NOT NULL AND pause_kind IS NULL AND pause_action IS NULL)
@@ -95,31 +66,31 @@ CREATE TABLE feed_items (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE feed_card_views (
-    session_id VARCHAR(64) COLLATE utf8mb4_bin NOT NULL,
+    session_id VARCHAR(36) COLLATE utf8mb4_bin NOT NULL,
     card_id VARCHAR(64) COLLATE utf8mb4_bin NOT NULL,
     position INT NULL,
     sheep_count INT NOT NULL,
     viewed_at_ms BIGINT NOT NULL,
     view_order BIGINT NOT NULL,
     PRIMARY KEY (session_id, card_id),
-    CONSTRAINT fk_view_session FOREIGN KEY (session_id) REFERENCES feed_sessions(id),
+    CONSTRAINT fk_view_session FOREIGN KEY (session_id) REFERENCES be1_sessions(id) ON DELETE CASCADE,
     CONSTRAINT fk_view_card FOREIGN KEY (card_id) REFERENCES feed_card_catalog(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE night_reactions (
-    night_id VARCHAR(64) COLLATE utf8mb4_bin NOT NULL,
+    night_id VARCHAR(36) COLLATE utf8mb4_bin NOT NULL,
     card_id VARCHAR(64) COLLATE utf8mb4_bin NOT NULL,
     fluff_saved BOOLEAN NOT NULL DEFAULT FALSE,
     song_saved_at_ms BIGINT NULL,
     PRIMARY KEY (night_id, card_id),
-    CONSTRAINT fk_reaction_night FOREIGN KEY (night_id) REFERENCES night_records(id),
+    CONSTRAINT fk_reaction_night FOREIGN KEY (night_id) REFERENCES be1_nights(id) ON DELETE CASCADE,
     CONSTRAINT fk_reaction_card FOREIGN KEY (card_id) REFERENCES feed_card_catalog(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- BE3는 이 테이블의 placements_json/version을 갱신한다. BE2는 채택 시 한 번만 삽입한다.
 CREATE TABLE adopted_sheep (
     id VARCHAR(64) COLLATE utf8mb4_bin PRIMARY KEY,
-    night_id VARCHAR(64) COLLATE utf8mb4_bin NOT NULL,
+    night_id VARCHAR(36) COLLATE utf8mb4_bin NOT NULL,
     user_id VARCHAR(36) COLLATE utf8mb4_bin NOT NULL,
     night_date DATE NOT NULL,
     card_id VARCHAR(64) COLLATE utf8mb4_bin NOT NULL,
@@ -131,19 +102,19 @@ CREATE TABLE adopted_sheep (
     version INT NOT NULL DEFAULT 1,
     UNIQUE KEY uk_sheep_night (night_id),
     INDEX ix_sheep_user_date (user_id, night_date, id),
-    CONSTRAINT fk_sheep_night FOREIGN KEY (night_id) REFERENCES night_records(id),
+    CONSTRAINT fk_sheep_night FOREIGN KEY (night_id) REFERENCES be1_nights(id) ON DELETE CASCADE,
     CONSTRAINT fk_sheep_card FOREIGN KEY (card_id) REFERENCES feed_card_catalog(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE feed_resume_receipts (
     user_id VARCHAR(36) COLLATE utf8mb4_bin NOT NULL,
     key_hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
-    session_id VARCHAR(64) COLLATE utf8mb4_bin NOT NULL,
+    session_id VARCHAR(36) COLLATE utf8mb4_bin NOT NULL,
     response_json JSON NOT NULL,
     expires_at_ms BIGINT NOT NULL,
     PRIMARY KEY (user_id, key_hash),
     INDEX ix_resume_expiry (expires_at_ms),
-    CONSTRAINT fk_resume_session FOREIGN KEY (session_id) REFERENCES feed_sessions(id)
+    CONSTRAINT fk_resume_session FOREIGN KEY (session_id) REFERENCES be1_sessions(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE feed_category_colors (
