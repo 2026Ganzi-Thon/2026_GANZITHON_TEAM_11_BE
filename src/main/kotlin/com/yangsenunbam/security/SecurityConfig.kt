@@ -1,5 +1,9 @@
 package com.yangsenunbam.security
 
+import com.yangsenunbam.auth.AuthStore
+import com.yangsenunbam.user.OnboardingStore
+import com.yangsenunbam.user.LegalPolicy
+import java.time.Clock
 import com.yangsenunbam.common.ErrorDetail
 import com.yangsenunbam.common.ErrorResponse
 import com.yangsenunbam.common.requestId
@@ -14,14 +18,22 @@ import org.springframework.security.authorization.AuthorizationDecision
 import org.springframework.security.config.annotation.web.builders.HttpSecurity
 import org.springframework.security.config.http.SessionCreationPolicy
 import org.springframework.security.web.SecurityFilterChain
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter
 import tools.jackson.databind.json.JsonMapper
 
 @Configuration
-class SecurityConfig {
-    // BE1에서 Bearer 토큰 검증과 CurrentUser를 만드는 인증 필터를 연결한다.
+class SecurityConfig(
+    tokens: TokenService,
+    store: AuthStore,
+    onboarding: OnboardingStore,
+    policy: LegalPolicy,
+    clock: Clock,
+) {
+    // Created only inside the Spring Security chain to prevent duplicate servlet filter registration.
+    private val bearerFilter = BearerTokenFilter(tokens, store, onboarding, policy, clock)
     @Bean
     fun authenticationManager(): AuthenticationManager = AuthenticationManager {
-        throw BadCredentialsException("Authentication is not implemented")
+        throw BadCredentialsException("Use bearer authentication")
     }
 
     @Bean
@@ -39,6 +51,7 @@ class SecurityConfig {
             .requestCache { it.disable() }
             .sessionManagement { it.sessionCreationPolicy(SessionCreationPolicy.STATELESS) }
             .authorizeHttpRequests {
+                it.requestMatchers(HttpMethod.GET, "/actuator/health", "/actuator/health/liveness", "/actuator/health/readiness").permitAll()
                 it.requestMatchers(HttpMethod.POST, "/api/v1/auth/register", "/api/v1/auth/login", "/api/v1/auth/refresh",
                     "/api/v1/auth/password-reset/request", "/api/v1/auth/password-reset/confirm").permitAll()
                 it.requestMatchers(HttpMethod.GET, "/api/v1/legal-documents").permitAll()
@@ -52,6 +65,7 @@ class SecurityConfig {
                     AuthorizationDecision(user?.onboardingComplete == true)
                 }
             }
+            .addFilterBefore(bearerFilter, UsernamePasswordAuthenticationFilter::class.java)
             .exceptionHandling {
                 it.authenticationEntryPoint { req, res, _ -> error(req, res, 401, "UNAUTHORIZED", "로그인이 필요해요.") }
                 it.accessDeniedHandler { req, res, _ ->

@@ -24,8 +24,11 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-validation")
     implementation("org.springframework.boot:spring-boot-starter-security")
     implementation("org.springframework.boot:spring-boot-starter-jdbc")
+    implementation("org.springframework.boot:spring-boot-starter-mail")
+    implementation("org.springframework.boot:spring-boot-starter-actuator")
     implementation("org.springframework.boot:spring-boot-starter-flyway")
     runtimeOnly("org.flywaydb:flyway-mysql")
+    runtimeOnly("com.h2database:h2")
     runtimeOnly("com.mysql:mysql-connector-j")
     implementation("tools.jackson.module:jackson-module-kotlin")
     implementation("org.jetbrains.kotlin:kotlin-reflect")
@@ -33,7 +36,6 @@ dependencies {
     testImplementation("org.springframework.boot:spring-boot-starter-webmvc-test")
     testImplementation("org.springframework.security:spring-security-test")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
-    testRuntimeOnly("com.h2database:h2")
     testImplementation("org.testcontainers:testcontainers-mysql")
 }
 
@@ -41,16 +43,19 @@ tasks.withType<Test> {
     useJUnitPlatform()
 }
 
+tasks.bootJar { archiveFileName.set("yangsebam.jar") }
+
 tasks.test {
+    exclude("**/Be1MySqlIntegrationTest.class")
     useJUnitPlatform { excludeTags("mysql") }
 }
 
 tasks.register<Test>("mysqlTest") {
-    description = "Runs BE2 integration tests against MySQL (Docker or MYSQL_TEST_URL)."
+    description = "Runs integration tests against a dedicated MySQL test database."
     group = "verification"
     testClassesDirs = sourceSets.test.get().output.classesDirs
     classpath = sourceSets.test.get().runtimeClasspath
-    useJUnitPlatform { includeTags("mysql") }
+    include("**/Be1MySqlIntegrationTest.class", "**/MysqlBe2Test.class")
     outputs.upToDateWhen { false }
     shouldRunAfter(tasks.test)
 }
