@@ -1,8 +1,8 @@
-name: BE2 MySQL tests
+name: Backend MySQL tests
 
 on:
   push:
-    branches: ["BE2_*"]
+    branches: ["BE2_*", "INTEGRATION_*"]
   pull_request:
     paths:
       - "src/**"

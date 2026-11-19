@@ -340,7 +340,7 @@ class MysqlBe2Test {
     }
 
     @Test
-    fun `BE1 bearer flow uses one session through BE2 feed progress finish and adoption`() {
+    fun `BE1 bearer flow continues through BE2 adoption to BE3 flock list and detail`() {
         clock.current = close.minusSeconds(60)
         val registration = mvc.perform(post("/api/v1/auth/register")
             .header("Idempotency-Key", "register-${UUID.randomUUID()}")
@@ -380,8 +380,16 @@ class MysqlBe2Test {
         getWithToken("/bootstrap").andExpect(status().isOk).andExpect(jsonPath("$.next_screen").value("MORNING_ADOPTION"))
         getWithToken("/morning").andExpect(status().isOk)
             .andExpect(jsonPath("$.counted_sheep").value(3)).andExpect(jsonPath("$.default_card_id").value("s1-c7"))
-        putWithToken("/nights/$nightId/adoption", """{"card_id":null}""")
-            .andExpect(status().isOk).andExpect(jsonPath("$.card_id").value("s1-c7"))
+        val adoption = putWithToken("/nights/$nightId/adoption", """{"card_id":null}""")
+            .andExpect(status().isOk).andExpect(jsonPath("$.card_id").value("s1-c7")).andReturn()
+        val sheepId = mapper.readTree(adoption.response.contentAsString).path("id").asString()
+        getWithToken("/sheep").andExpect(status().isOk)
+            .andExpect(jsonPath("$.items.length()").value(1)).andExpect(jsonPath("$.items[0].id").value(sheepId))
+        getWithToken("/sheep/$sheepId").andExpect(status().isOk)
+            .andExpect(jsonPath("$.sheep.night_id").value(nightId))
+            .andExpect(jsonPath("$.card.id").value("s1-c7"))
+            .andExpect(jsonPath("$.position").value(3))
+            .andExpect(jsonPath("$.sheep_count").value(3))
     }
 
     private fun progress(position: Int, furthest: Int = position, sequence: Long = 1) = feed.saveProgress(user, "s1", ProgressRequest(position, furthest, sequence, 1))
