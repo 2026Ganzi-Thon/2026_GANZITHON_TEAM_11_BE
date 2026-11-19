@@ -19,6 +19,7 @@ import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean
+import org.springframework.test.context.bean.override.convention.TestBean
 import org.springframework.test.util.AopTestUtils
 import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.support.TransactionTemplate
@@ -45,7 +46,7 @@ open class Be1P1ConcurrencyTest {
     @Autowired lateinit var jdbc: JdbcTemplate
     @Autowired lateinit var manager: PlatformTransactionManager
     @Autowired lateinit var mapper: JsonMapper
-    @MockitoBean lateinit var clock: Clock
+    @TestBean(methodName = "fixedClock") lateinit var clock: Clock
     @MockitoBean lateinit var feed: FeedPreparationPort
     @MockitoBean lateinit var closing: ClosingCardPort
     @MockitoBean lateinit var visibility: ClosingCardVisibilityPort
@@ -54,15 +55,10 @@ open class Be1P1ConcurrencyTest {
     @MockitoBean lateinit var mail: ResetMailDelivery
     private val lockEntered = AtomicReference<CountDownLatch?>()
     private val cardEntered = AtomicReference<CountDownLatch?>()
-    private val now = Instant.parse("2026-11-16T13:00:00Z")
     private val oldPassword = "OldFixture123!"
     private val newPassword = "NewFixture123!"
 
     @BeforeEach fun setup() {
-        `when`(clock.instant()).thenReturn(now)
-        `when`(clock.millis()).thenReturn(now.toEpochMilli())
-        `when`(clock.zone).thenReturn(ZoneOffset.UTC)
-        `when`(clock.withZone(any<ZoneId>() ?: ZoneOffset.UTC)).thenAnswer { Clock.fixed(now, it.getArgument(0)) }
         val targetStore = AopTestUtils.getUltimateTargetObject<AuthStore>(store)
         doAnswer {
             if (Thread.currentThread().name == "p1-contender") lockEntered.get()?.countDown()
@@ -75,6 +71,13 @@ open class Be1P1ConcurrencyTest {
                 { rs, _ -> rs.getBoolean(1) }, it.getArgument<String>(0)).firstOrNull() ?: false
         }.`when`(visibility).lockAndCheckAvailable(anyString())
         doReturn(1).`when`(feed).prepare(anyString(), anyString(), anyString(), anyInt())
+    }
+
+    companion object {
+        private val now = Instant.parse("2026-11-16T13:00:00Z")
+
+        // Scheduled workers share this clock with the test threads.
+        @JvmStatic fun fixedClock(): Clock = Clock.fixed(now, ZoneOffset.UTC)
     }
 
     private data class Account(val user: CurrentUser, val email: String, val auth: AuthResponse)
