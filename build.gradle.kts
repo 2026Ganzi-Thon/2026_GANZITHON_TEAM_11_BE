@@ -55,7 +55,7 @@ tasks.register<Test>("mysqlTest") {
     group = "verification"
     testClassesDirs = sourceSets.test.get().output.classesDirs
     classpath = sourceSets.test.get().runtimeClasspath
-    include("**/Be1MySqlIntegrationTest.class", "**/MysqlBe2Test.class")
+    include("**/Be1MySqlIntegrationTest.class", "**/MysqlBe2Test.class", "**/MysqlBe3FlockTest.class")
     outputs.upToDateWhen { false }
     shouldRunAfter(tasks.test)
 }
