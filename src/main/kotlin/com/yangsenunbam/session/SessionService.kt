@@ -174,11 +174,12 @@ class SessionService(
             chosen.content !is TextCardContent) {
             throw ApiException(ErrorCode.FEED_BUILD_UNAVAILABLE, "마무리 카드가 준비되지 않았어요.")
         }
+        val fluffCount = feed.countSavedFluff(night.id, row.id, request.furthestPosition)
         val now = clock.millis()
         if (now >= row.closesAtMs) throw ApiException(ErrorCode.SESSION_CLOSED, "밤이 종료됐어요.")
         val status = if (request.reason == FinishReason.COMPLETED) FinishedStatus.COMPLETED else FinishedStatus.STOPPED
         if (sessions.finish(row, request.reason, request.position, request.furthestPosition,
-                request.sequence, request.writerEpoch, now, mapper.writeValueAsString(chosen), status) != 1) {
+                request.sequence, request.writerEpoch, now, mapper.writeValueAsString(chosen), status, fluffCount) != 1) {
             throw ApiException(ErrorCode.FINISH_CONFLICT, "다른 종료 요청이 먼저 처리됐어요.")
         }
         if (night.writingState == null) nights.writingState(night.id, WritingState.OFFERED)

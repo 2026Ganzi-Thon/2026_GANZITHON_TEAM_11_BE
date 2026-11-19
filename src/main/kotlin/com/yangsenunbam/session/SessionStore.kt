@@ -78,10 +78,11 @@ class SessionStore(private val jdbc: JdbcTemplate) {
     }
 
     fun finish(record: SessionRecord, reason: FinishReason, position: Int, furthest: Int, sequence: Long,
-        epoch: Long, finishedAt: Long, closingJson: String, status: FinishedStatus) = jdbc.update(
+        epoch: Long, finishedAt: Long, closingJson: String, status: FinishedStatus, fluffCount: Int) = jdbc.update(
         """UPDATE be1_sessions SET status=?, position=?, furthest_position=?, sequence=?, finished_at_ms=?, finish_reason=?,
-          finish_position=?, finish_sequence=?, finish_writer_epoch=?, closing_card_json=? WHERE id=? AND status='active'""".trimIndent(),
-        status.value, position, furthest, sequence, finishedAt, reason.value, position, sequence, epoch, closingJson, record.id,
+          finish_position=?, finish_sequence=?, finish_writer_epoch=?, closing_card_json=?, fluff_count=?
+          WHERE id=? AND status='active'""".trimIndent(),
+        status.value, position, furthest, sequence, finishedAt, reason.value, position, sequence, epoch, closingJson, fluffCount, record.id,
     )
 
     fun expire(nowMs: Long) = jdbc.update(

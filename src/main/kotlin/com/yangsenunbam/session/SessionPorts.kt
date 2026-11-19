@@ -6,10 +6,11 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.context.annotation.Configuration
 import org.springframework.context.annotation.Bean
 
-/** BE2 implements atomically in same datasource/transaction: ordered N cards + pause positions. */
+/** BE2 owns feed data used by the BE1 session lifecycle in the same transaction. */
 interface FeedPreparationPort {
     fun prepare(userId: String, nightId: String, sessionId: String, sheepCount: Int): Int
     fun canFinishStopPause(sessionId: String, position: Int): Boolean
+    fun countSavedFluff(nightId: String, sessionId: String, furthestPosition: Int): Int
 }
 
 /** BE2 + BE3 provide an approved closing text card; no placeholder is emitted in production. */
@@ -42,6 +43,8 @@ class MissingIntegrationPorts {
             throw ApiException(ErrorCode.FEED_BUILD_UNAVAILABLE, "BE2 피드 생성 연동이 필요해요.")
         override fun canFinishStopPause(sessionId: String, position: Int): Boolean =
             throw ApiException(ErrorCode.FEED_BUILD_UNAVAILABLE, "BE2 쉼표 검증 연동이 필요해요.")
+        override fun countSavedFluff(nightId: String, sessionId: String, furthestPosition: Int): Int =
+            throw ApiException(ErrorCode.FEED_BUILD_UNAVAILABLE, "BE2 솜털 집계 연동이 필요해요.")
     }
     @Bean
     @ConditionalOnMissingBean(ClosingCardPort::class)

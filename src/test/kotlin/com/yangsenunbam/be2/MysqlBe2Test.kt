@@ -318,6 +318,24 @@ class MysqlBe2Test {
     }
 
     @Test
+    fun `finish counts distinct viewed fluff and keeps the count on replay`() {
+        // A later feed slot can repeat the same card when the catalog is small.
+        jdbc.update("UPDATE feed_items SET card_id = 's1-c1' WHERE id = 's1-i6'")
+        progress(3)
+        repeat(2) { feed.saveFluff(user, "n1", "s1-c1", SaveRequest(true)) }
+        feed.saveFluff(user, "n1", "s1-c2", SaveRequest(true))
+        feed.saveFluff(user, "n1", "s1-c2", SaveRequest(false))
+
+        fun finish() = mvc.perform(post("/api/v1/sessions/s1/finish").with(auth())
+            .header("Idempotency-Key", "fluff-summary").contentType(MediaType.APPLICATION_JSON)
+            .content("""{"reason":"leave","position":6,"furthest_position":6,"sequence":2,"writer_epoch":1}"""))
+
+        finish().andExpect(status().isOk).andExpect(jsonPath("$.summary.fluff_count").value(1))
+        feed.saveFluff(user, "n1", "s1-c1", SaveRequest(false))
+        finish().andExpect(status().isOk).andExpect(jsonPath("$.summary.fluff_count").value(1))
+    }
+
+    @Test
     fun `eleven BE2 HTTP endpoints use MySQL with snake case responses`() {
         mvc.perform(get("/api/v1/sessions/s1/feed").with(auth())).andExpect(status().isOk)
         mvc.perform(post("/api/v1/sessions/s1/resume").with(auth()).header("Idempotency-Key", "http"))

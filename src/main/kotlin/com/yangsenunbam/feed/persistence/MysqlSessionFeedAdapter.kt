@@ -45,6 +45,15 @@ class MysqlSessionFeedAdapter(
         "SELECT pause_kind FROM feed_items WHERE session_id = ? AND position = ?", sessionId, position,
     ) { it.getString("pause_kind") } == PauseKind.STOP_OFFER.value
 
+    override fun countSavedFluff(nightId: String, sessionId: String, furthestPosition: Int): Int = jdbc.queryForObject(
+        """SELECT COUNT(DISTINCT i.card_id)
+            FROM feed_items i
+            JOIN night_reactions r ON r.card_id = i.card_id AND r.night_id = ? AND r.fluff_saved = TRUE
+            JOIN feed_card_catalog c ON c.id = i.card_id AND c.available = TRUE
+            WHERE i.session_id = ? AND i.position <= ?""",
+        Int::class.java, nightId, sessionId, furthestPosition,
+    ) ?: 0
+
     override fun choose(userId: String, nightId: String, sessionId: String, reason: FinishReason): CardResponse = store.withUser(userId) { tx ->
         val session = tx.ownedSession(userId, sessionId)
         val night = tx.ownedNight(userId, nightId)
