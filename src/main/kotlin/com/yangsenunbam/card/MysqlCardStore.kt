@@ -15,10 +15,6 @@ import java.sql.ResultSet
 import java.time.Clock
 import java.time.Instant
 
-/**
- * card_submissions(V5)에 제출·검수 상태를 저장한다. 승인·삭제 시 BE2의 [MysqlCardCatalog]로 공개 목록을 갱신한다.
- * 잠금 순서: auth_users(작성자) → card_submissions → feed_card_catalog.
- */
 @Repository
 @Profile("mysql")
 class MysqlCardStore(
@@ -28,7 +24,6 @@ class MysqlCardStore(
     private val mapper: JsonMapper,
     private val clock: Clock,
 ) : CardStore {
-
     override fun lockUser(userId: String) {
         auth.lockUser(userId) ?: throw ApiException(ErrorCode.RESOURCE_NOT_FOUND, "계정을 찾을 수 없어요.")
     }
@@ -82,7 +77,6 @@ class MysqlCardStore(
     override fun markDeleted(cardId: String, at: Instant) {
         jdbc.update("UPDATE card_submissions SET content_json = NULL, rejection_reason = NULL, deleted_at_ms = ? WHERE id = ?",
             at.toEpochMilli(), cardId)
-        // 받은 털실의 전송 이력도 남기지 않는다(현재 털실은 unpublish가 지운다).
         jdbc.update("DELETE FROM yarn_events WHERE card_id = ?", cardId)
     }
 
@@ -142,7 +136,6 @@ class MysqlCardStore(
         CardKind.SONG -> mapper.readValue(json, SongCardContent::class.java)
     }
 
-    /** SubmissionResponse.content는 sealed 타입이라 kind와 본문 JSON을 나눠 저장한다. */
     private data class Snapshot(
         val id: String, val kind: String, val categoryId: String, val contentJson: String, val moderationStatus: String,
         val rejectionReason: String?, val yarnCount: Long, val createdAtMs: Long, val revision: Int,

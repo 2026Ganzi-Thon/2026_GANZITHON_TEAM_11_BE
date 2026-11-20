@@ -16,10 +16,6 @@ import java.time.Clock
 import java.time.Duration
 import java.util.Locale
 
-/**
- * iTunes 검색 결과를 music_tracks에 정규화해 두고, 검색어별 결과 순서를 music_search_cache에 캐시한다.
- * 외부 검색이 실패하면 만료된 캐시라도 있으면 그 결과를 쓰고, 없으면 503 MUSIC_SEARCH_UNAVAILABLE.
- */
 @Repository
 @Profile("mysql")
 class MysqlMusicCatalog(
@@ -29,7 +25,6 @@ class MysqlMusicCatalog(
     private val clock: Clock,
     @Value("\${app.music.cache-ttl:PT24H}") private val ttl: Duration,
 ) : MusicCatalog {
-
     override fun search(query: String, limit: Int): List<TrackResponse> {
         val normalized = normalize(query)
         val hash = sha256(normalized)
@@ -54,7 +49,6 @@ class MysqlMusicCatalog(
 
     override fun find(trackId: String): TrackResponse? {
         jdbc.first("SELECT * FROM music_tracks WHERE id = ?", trackId) { track(it) }?.let { return it }
-        // 캐시가 비워졌거나 다른 서버가 검색한 곡이면 iTunes에서 한 번 더 확인한다.
         val itunesId = Tracks.itunesId(trackId) ?: return null
         val found = itunes.lookup(itunesId)?.let(Tracks::from) ?: return null
         upsert(found, clock.millis())
@@ -82,7 +76,6 @@ class MysqlMusicCatalog(
     )
 
     companion object {
-        /** 검색어마다 최대치(50)를 받아 캐시하고 요청한 limit만큼 잘라 준다. */
         const val FETCH_SIZE = 50
 
         fun normalize(query: String): String =

@@ -10,11 +10,9 @@ import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
 
-/** 잠금 순서: feed_card_catalog(공유) → feed_card_yarn·yarn_events. 카드 삭제(BE2 remove)는 카드 배타 잠금 후 털실을 지운다. */
 @Repository
 @Profile("mysql")
 class MysqlYarnStore(private val jdbc: JdbcTemplate, private val catalog: MysqlCardCatalog) : YarnStore {
-
     override fun lockCardAvailable(cardId: String): Boolean? {
         val exists = jdbc.queryForObject("SELECT COUNT(*) FROM feed_card_catalog WHERE id = ?", Int::class.java, cardId) == 1
         return if (exists) catalog.lockAvailable(cardId) else null
@@ -33,7 +31,6 @@ class MysqlYarnStore(private val jdbc: JdbcTemplate, private val catalog: MysqlC
 
     override fun send(userId: String, cardId: String, at: Instant) {
         jdbc.update("INSERT IGNORE INTO feed_card_yarn(user_id, card_id) VALUES (?, ?)", userId, cardId)
-        // 취소 후 다시 보내도 최초 전송 시각을 유지해 같은 반응을 다시 집계하지 않는다.
         jdbc.update("""INSERT INTO yarn_events(user_id, card_id, first_sent_at_ms, canceled_at_ms) VALUES (?, ?, ?, NULL)
             ON DUPLICATE KEY UPDATE canceled_at_ms = NULL""", userId, cardId, at.toEpochMilli())
     }

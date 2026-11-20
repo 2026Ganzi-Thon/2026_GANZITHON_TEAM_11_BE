@@ -16,7 +16,7 @@ class FlockServiceTest {
     private val user = CurrentUser("u_1", true)
     private val d9 = LocalDate.parse("2026-11-09")
     private val store = FakeFlockStore()
-    private val clock = MutableClock(Instant.parse("2026-11-11T03:00:00Z")) // 12:00 KST, 낮
+    private val clock = MutableClock(Instant.parse("2026-11-11T03:00:00Z"))
     private val service = FlockService(store, KstNightTime(clock))
 
     @Test
@@ -35,7 +35,6 @@ class FlockServiceTest {
         } while (cursor != null)
 
         assertThat(pages).isEqualTo(3)
-        // night_date: sh_3=d9, sh_1·sh_4=d10, sh_2·sh_5=d11
         assertThat(seen).containsExactly("sh_5", "sh_2", "sh_4", "sh_1", "sh_3")
     }
 
@@ -107,7 +106,7 @@ class FlockServiceTest {
         assertCode(ErrorCode.VALIDATION_ERROR) {
             service.saveStickers(user, "sh_1", SaveStickersRequest(1, listOf(placement("pl_1", "st_none"))))
         }
-        clock.current = Instant.parse("2026-11-11T12:00:00Z") // 21:00 KST
+        clock.current = Instant.parse("2026-11-11T12:00:00Z")
         assertCode(ErrorCode.DAY_ONLY) { service.saveStickers(user, "sh_1", ok) }
     }
 
@@ -118,7 +117,6 @@ class FlockServiceTest {
         assertThatThrownBy(block).isInstanceOfSatisfying(ApiException::class.java) { assertThat(it.code).isEqualTo(code) }
     }
 
-    /** 저장소 계약(정렬·cursor·소유자)을 그대로 흉내 내는 메모리 구현. */
     private class FakeFlockStore : FlockStore {
         private val sheep = mutableListOf<Pair<String, SheepResponse>>()
         val stickers = mutableListOf<StickerResponse>()

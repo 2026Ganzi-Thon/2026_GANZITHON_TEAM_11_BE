@@ -26,7 +26,6 @@ class MysqlCrossDomainAccountDeletion(
 ) : CrossDomainAccountDeletionPort {
     override fun deleteOwnedData(userId: String) {
         if (auth.lockUser(userId) == null) throw ApiException(ErrorCode.RESOURCE_NOT_FOUND, "계정이 없어요.")
-        // BE3 moderation locks card_submissions before feed_card_catalog; keep the same order here.
         jdbc.queryForList("SELECT id FROM card_submissions WHERE user_id = ? ORDER BY id FOR UPDATE", String::class.java, userId)
         // Acquire own domain locks before card locks, including rows CASCADE will delete.
         jdbc.queryForList("SELECT id FROM be1_nights WHERE user_id = ? ORDER BY id FOR UPDATE", String::class.java, userId)
@@ -60,7 +59,6 @@ class MysqlCrossDomainAccountDeletion(
             jdbc.update("DELETE FROM feed_card_yarn WHERE card_id = ?", cardId)
         }
         jdbc.update("DELETE FROM feed_card_yarn WHERE user_id = ?", userId)
-        // BE3 (V5): submissions incl. unpublished text, idempotency replays, yarn history and summaries.
         cardIds.forEach { jdbc.update("DELETE FROM yarn_events WHERE card_id = ?", it) }
         jdbc.update("DELETE FROM yarn_events WHERE user_id = ?", userId)
         jdbc.update("DELETE FROM yarn_summaries WHERE user_id = ?", userId)

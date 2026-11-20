@@ -9,13 +9,8 @@ import java.time.Clock
 import java.time.LocalDate
 import java.time.LocalTime
 
-// BE3
 @Service
 class YarnService(private val store: YarnStore, private val clock: Clock) {
-    /**
-     * PUT /cards/{id}/yarn — 사용자·카드당 하나. 피드에 배정된 카드만 가능하며 다른 사람의 피드 카드는 404.
-     * 삭제 카드에 새로 보내면 409 CARD_UNAVAILABLE, 취소(false)는 언제나 목표 상태로 응답한다.
-     */
     @Transactional
     fun save(user: CurrentUser, cardId: String, request: YarnRequest): YarnResponse {
         val available = store.lockCardAvailable(cardId)
@@ -32,10 +27,6 @@ class YarnService(private val store: YarnStore, private val clock: Clock) {
         return YarnResponse(cardId, request.sent)
     }
 
-    /**
-     * GET /me/yarn-summary — 직전 04시~이번 04시에 받은 털실(04시 이전 집계분)만 제공한다.
-     * 0개이거나 이미 확인했으면 summary=null. 삭제 카드의 털실은 조회 때마다 제외한다.
-     */
     @Transactional
     fun summary(user: CurrentUser): YarnSummaryResponse {
         val date = summaryDate()
@@ -49,7 +40,6 @@ class YarnService(private val store: YarnStore, private val clock: Clock) {
         return YarnSummaryResponse(YarnSummary(row.id, date, tally.yarnCount, tally.senderCount))
     }
 
-    /** PUT /me/yarn-summary/{id}/seen — 본인 요약만, 반복 204. */
     @Transactional
     fun markSeen(user: CurrentUser, summaryId: String) {
         if (!store.markSeen(user.id, summaryId, clock.instant())) {
@@ -57,7 +47,6 @@ class YarnService(private val store: YarnStore, private val clock: Clock) {
         }
     }
 
-    /** 04시가 지난 가장 최근 날짜(KST). 00~04시에는 전날 요약을 보여준다. */
     private fun summaryDate(): LocalDate {
         val now = clock.instant().atZone(KstNightTime.KST)
         return if (now.toLocalTime() >= CUTOFF) now.toLocalDate() else now.toLocalDate().minusDays(1)

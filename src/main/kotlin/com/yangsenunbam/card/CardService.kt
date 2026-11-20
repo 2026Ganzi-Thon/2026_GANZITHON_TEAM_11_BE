@@ -17,12 +17,9 @@ import java.time.Clock
 import java.time.Duration
 import java.util.UUID
 
-/** 사용자 카드의 공개 표시 규칙. 팀 합의 전 값이며 바뀌면 여기만 고친다. */
 object UserCardPolicy {
-    /** 기능명세 CARD-03: 작성자는 '먼저 지나간 양'으로 표시한다. */
     const val AUTHOR_LABEL = "먼저 지나간 양"
 
-    /** 검수 요청에 tone이 없어 사용자 글 카드는 공감 카드로 발행한다. 노래 카드는 tone=null. */
     val TEXT_TONE = CardTone.EMPATHY
 
     val IDEMPOTENCY_TTL: Duration = Duration.ofHours(24)
@@ -33,7 +30,6 @@ fun SubmissionRecord.toResponse(yarnCount: Long): SubmissionResponse = Submissio
     status, rejectionReason, yarnCount, createdAt, revision,
 )
 
-// BE3
 @Service
 class CardService(
     private val store: CardStore,
@@ -45,14 +41,12 @@ class CardService(
     private val clock: Clock,
     private val mapper: JsonMapper,
 ) {
-    /** POST /cards — 자동 검사를 통과하면 pending으로 접수한다. 밤에는 작성 제안(writing)에서 진입한 경우만 허용. */
     @Transactional
     fun submit(user: CurrentUser, request: SubmitCardRequest, idempotencyKey: String): SubmissionResponse {
         val draft = Draft.of(request.kind, request.categoryId, request.content)
         val sourceNightId = request.sourceNightId?.trim()
         val fingerprint = fingerprint(SUBMIT, null, draft, sourceNightId)
         val keyHash = sha256(idempotencyKey)
-        // 재전송은 외부 검사 결과에 좌우되지 않도록 먼저 확인한다.
         store.replay(user.id, SUBMIT, keyHash)?.let { return it.resolve(fingerprint) }
 
         val change = prepare(draft)
@@ -79,7 +73,6 @@ class CardService(
         return response
     }
 
-    /** GET /me/cards — 본인 카드(삭제 제외), 생성일·id 내림차순. */
     @Transactional(readOnly = true)
     fun myCards(user: CurrentUser, status: ModerationStatus?, cursor: String?, limit: Int): PageResponse<SubmissionResponse> {
         val after = cursor?.let(::decodeCursor)
@@ -87,7 +80,6 @@ class CardService(
         return page(rows, limit) { it.createdAt.toEpochMilli() }
     }
 
-    /** DELETE /me/cards/{id} — 본문을 숨기고 공개 목록·받은 털실을 지운다. 이미 삭제했으면 그대로 204. */
     @Transactional
     fun delete(user: CurrentUser, cardId: String) {
         store.lockUser(user.id)
@@ -99,7 +91,6 @@ class CardService(
         if (record.status == ModerationStatus.APPROVED) store.unpublish(cardId, at)
     }
 
-    /** POST /me/cards/{id}/resubmit — 반려 카드만 고쳐서 pending으로 되돌린다. */
     @Transactional
     fun resubmit(user: CurrentUser, cardId: String, request: ResubmitCardRequest, idempotencyKey: String): SubmissionResponse {
         val draft = Draft.of(request.kind, request.categoryId, request.content)
@@ -107,7 +98,6 @@ class CardService(
         val keyHash = sha256(idempotencyKey)
         store.replay(user.id, RESUBMIT, keyHash)?.let { return it.resolve(fingerprint) }
 
-        // 소유·상태 확인을 외부 검사보다 먼저 해서 남의 카드에 검사 비용을 쓰지 않는다.
         current(user, cardId)
         val change = prepare(draft)
         store.lockUser(user.id)
@@ -133,7 +123,6 @@ class CardService(
         return record
     }
 
-    /** 곡 확인과 자동 안전 검사. 위기 표현이면 422 SUPPORT_RECOMMENDED(error.support), 검사 장애는 503. */
     private fun prepare(draft: Draft): SubmissionContent {
         val content = when (draft.kind) {
             CardKind.TEXT -> TextCardContent(draft.text!!)
@@ -145,7 +134,6 @@ class CardService(
                 SongCardContent(track, draft.recommendation)
             }
         }
-        // 안전 검사기의 입력 길이 제한(500자) 안에 들도록 사용자가 쓴 문장을 각각 검사한다.
         for (text in listOfNotNull(draft.text, draft.recommendation, draft.manualTitle, draft.manualArtist)) {
             val verdict = safety.check(text)
             if (verdict.needsSupport) {
@@ -169,7 +157,6 @@ class CardService(
             "manual_artist" to draft.manualArtist, "recommendation" to draft.recommendation, "source_night_id" to sourceNightId,
         )))
 
-    /** 앞뒤 공백을 제거한 제출 내용. 길이 검증은 요청 DTO의 @TextLength가 맡는다. */
     private data class Draft(
         val kind: CardKind, val categoryId: CategoryId, val text: String?, val trackId: String?,
         val manualTitle: String?, val manualArtist: String?, val recommendation: String?,

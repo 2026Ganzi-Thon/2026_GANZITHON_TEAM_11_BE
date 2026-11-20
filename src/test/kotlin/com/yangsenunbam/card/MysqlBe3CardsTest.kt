@@ -44,7 +44,6 @@ import java.sql.Date
 import java.time.Instant
 import java.time.LocalDate
 
-/** BE3 카드 작성·검수·곡 검색·털실·스티커 저장을 BE1·BE2 MySQL 테이블 위에서 HTTP부터 검증한다. `./gradlew mysqlTest`. */
 @Tag("mysql")
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -63,8 +62,8 @@ class MysqlBe3CardsTest {
     private val reader = "be3-reader"
     private val stranger = "be3-stranger"
     private val users = listOf(writer, reader, stranger)
-    private val day = Instant.parse("2026-11-11T03:00:00Z")      // 11/11 12:00 KST
-    private val night = Instant.parse("2026-11-10T13:00:00Z")    // 11/10 22:00 KST, night_date 11/10
+    private val day = Instant.parse("2026-11-11T03:00:00Z")
+    private val night = Instant.parse("2026-11-10T13:00:00Z")
     private var keySeq = 0
 
     @BeforeEach
@@ -85,8 +84,6 @@ class MysqlBe3CardsTest {
                 it, "$it@example.test", "test-fixture-not-a-login-hash")
         }
     }
-
-    // ---- 곡 검색 ----
 
     @Test
     fun `곡 검색은 iTunes 결과를 정규화하고 같은 검색어는 캐시에서 돌려준다`() {
@@ -119,8 +116,6 @@ class MysqlBe3CardsTest {
             .andExpect(status().isServiceUnavailable)
             .andExpect(jsonPath("$.error.code").value("MUSIC_SEARCH_UNAVAILABLE"))
     }
-
-    // ---- 카드 제출 ----
 
     @Test
     fun `낮에 글 카드를 제출하면 pending으로 접수되고 같은 멱등키는 같은 결과, 다른 본문은 409`() {
@@ -201,8 +196,6 @@ class MysqlBe3CardsTest {
         assertThat(count("card_submissions")).isZero()
     }
 
-    // ---- 검수·재제출·삭제 ----
-
     @Test
     fun `반려 후 재제출하면 revision이 오르고, 이전 revision 승인은 409, 최신 승인은 피드 공개 목록에 발행된다`() {
         val id = createdId("""{"kind":"text","category_id":"career","content":{"text":"첫 글"}}""")
@@ -255,8 +248,6 @@ class MysqlBe3CardsTest {
             .andExpect(jsonPath("$.error.code").value("MODERATION_CONFLICT"))
     }
 
-    // ---- 털실 ----
-
     @Test
     fun `피드에서 받은 카드에 털실을 보내고 취소하며, 작성자는 다음 04시 이후 요약을 한 번 본다`() {
         val id = approvedCard("털실 받을 글")
@@ -268,10 +259,9 @@ class MysqlBe3CardsTest {
         assertThat(count("feed_card_yarn")).isEqualTo(1)
         mvc.perform(asUser(writer, get("/api/v1/me/cards"))).andExpect(jsonPath("$.items[0].yarn_count").value(1))
 
-        // 같은 날 낮: 아직 04시 마감 전 집계분이 없다.
         mvc.perform(asUser(writer, get("/api/v1/me/yarn-summary"))).andExpect(content().json("""{"summary":null}"""))
 
-        clock.current = Instant.parse("2026-11-12T00:00:00Z") // 11/12 09:00 KST
+        clock.current = Instant.parse("2026-11-12T00:00:00Z")
         val body = mvc.perform(asUser(writer, get("/api/v1/me/yarn-summary"))).andExpect(status().isOk)
             .andExpect(jsonPath("$.summary.date").value("2026-11-12"))
             .andExpect(jsonPath("$.summary.yarn_count").value(1))
@@ -302,8 +292,6 @@ class MysqlBe3CardsTest {
         mvc.perform(asUser(writer, get("/api/v1/me/yarn-summary"))).andExpect(content().json("""{"summary":null}"""))
     }
 
-    // ---- 스티커 저장 ----
-
     @Test
     fun `스티커 배치는 낮에 전체 교체되고 version이 오르며 이전 version은 409, 밤에는 DAY_ONLY`() {
         val id = approvedCard("양 카드")
@@ -327,8 +315,6 @@ class MysqlBe3CardsTest {
             .andExpect(status().isConflict).andExpect(jsonPath("$.error.code").value("DAY_ONLY"))
     }
 
-    // ---- 탈퇴 ----
-
     @Test
     fun `탈퇴하면 작성 카드·멱등 기록·털실 이력·요약이 지워지고 계정 행을 지울 수 있다`() {
         val id = approvedCard("탈퇴할 글")
@@ -347,8 +333,6 @@ class MysqlBe3CardsTest {
         assertThat(jdbc.queryForObject("SELECT available FROM feed_card_catalog WHERE id = ?", Boolean::class.java, id)).isFalse()
         assertThat(jdbc.update("DELETE FROM auth_users WHERE id = ?", writer)).isEqualTo(1)
     }
-
-    // ---- helpers ----
 
     private fun submit(body: String, key: String, user: String = writer): ResultActions =
         mvc.perform(asUser(user, post("/api/v1/cards")).header("Idempotency-Key", key)
@@ -372,7 +356,6 @@ class MysqlBe3CardsTest {
     private fun stickers(user: String, body: String): ResultActions = mvc.perform(asUser(user, put("/api/v1/sheep/sh_1/stickers"))
         .contentType(MediaType.APPLICATION_JSON).content(body))
 
-    /** [user]의 세션 피드에 카드들을 배정한다. */
     private fun feedAccess(user: String, vararg cardIds: String) {
         nightRecord("n_$user", user, LocalDate.parse("2026-11-10"), "career", null)
         jdbc.update("""INSERT INTO be1_sessions(id, night_id, user_id, status, sheep_count, feed_version, started_at_ms, closes_at_ms)

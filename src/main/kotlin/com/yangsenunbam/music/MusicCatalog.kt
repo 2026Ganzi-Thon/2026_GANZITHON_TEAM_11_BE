@@ -19,19 +19,14 @@ import java.net.http.HttpClient
 import java.nio.charset.StandardCharsets
 import java.time.Duration
 
-/** BE3 곡 검색·확인 저장소. MySQL 구현은 [MysqlMusicCatalog]. */
 interface MusicCatalog {
-    /** 검색 결과를 정규화·캐시해 최대 [limit]개. 결과 없음은 빈 목록, 외부 장애는 503 MUSIC_SEARCH_UNAVAILABLE. */
     fun search(query: String, limit: Int): List<TrackResponse>
 
-    /** 검색 결과로 받은 track_id를 확인한다. 없는 곡이면 null. */
     fun find(trackId: String): TrackResponse?
 }
 
-/** iTunes Search API에서 받은 곡 한 건. */
 data class ItunesTrack(val trackId: Long, val title: String, val artist: String, val artworkUrl: String?)
 
-/** iTunes Search API 호출. 장애는 [ApiException] MUSIC_SEARCH_UNAVAILABLE로 던진다. */
 interface ItunesClient {
     fun search(term: String, limit: Int): List<ItunesTrack>
     fun lookup(trackId: Long): ItunesTrack?
@@ -51,12 +46,10 @@ object Tracks {
 
     fun from(track: ItunesTrack) = TrackResponse(
         id(track.trackId), track.title, track.artist,
-        // 100px 썸네일 대신 같은 경로의 600px 이미지를 사용한다.
         track.artworkUrl?.replace("100x100bb", "600x600bb"),
         spotifySearchUrl(track.title, track.artist),
     )
 
-    /** 직접 입력한 곡. 검수 때 사람이 확인하며 커버는 없다. */
     fun manual(id: String, title: String, artist: String) =
         TrackResponse(id, title, artist, null, spotifySearchUrl(title, artist))
 }
@@ -84,7 +77,6 @@ class HttpItunesClient(
 
     private fun fetch(uri: (UriBuilder) -> URI): List<ItunesTrack> {
         val body = try {
-            // iTunes는 text/javascript로 응답하므로 문자열로 받아 직접 읽는다.
             client.get().uri(uri).retrieve().body(String::class.java)
         } catch (e: Exception) {
             throw unavailable()

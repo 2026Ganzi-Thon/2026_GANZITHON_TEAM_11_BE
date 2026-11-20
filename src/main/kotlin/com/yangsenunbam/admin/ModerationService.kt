@@ -7,10 +7,8 @@ import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.Clock
 
-// BE3
 @Service
 class ModerationService(private val store: CardStore, private val clock: Clock) {
-    /** GET /admin/cards — 자동 검사를 통과한 검수 대기 카드, 먼저 제출한 카드부터. */
     @Transactional(readOnly = true)
     fun pendingCards(user: CurrentUser, status: String, cursor: String?, limit: Int): PageResponse<SubmissionResponse> {
         val after = cursor?.let(CardService::decodeCursor)
@@ -22,10 +20,6 @@ class ModerationService(private val store: CardStore, private val clock: Clock) 
         return PageResponse(items.map { it.toResponse(counts[it.id] ?: 0) }, next)
     }
 
-    /**
-     * PUT /admin/cards/{id}/moderation — pending 카드만 결정한다. revision이 다르거나 작성자가 삭제했으면 409.
-     * 이미 같은 결정이 반영된 같은 revision을 다시 보내면 현재 결과를 돌려준다.
-     */
     @Transactional
     fun moderate(user: CurrentUser, cardId: String, request: ModerationRequest): SubmissionResponse {
         val record = store.byId(cardId, lock = true)

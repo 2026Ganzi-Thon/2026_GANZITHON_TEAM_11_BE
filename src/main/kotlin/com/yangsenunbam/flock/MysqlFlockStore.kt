@@ -21,14 +21,9 @@ import tools.jackson.databind.json.JsonMapper
 import java.sql.Date
 import java.sql.ResultSet
 
-/**
- * BE2가 채택 시 삽입한 adopted_sheep와 BE2 카드 공개 목록(feed_card_catalog)을 읽어 양떼 응답을 만든다.
- * 밤 고민은 BE1의 be1_nights, 회고는 BE2의 night_feed_state, 솜털·노래 담기는 night_reactions에서 읽는다.
- */
 @Repository
 @Profile("mysql")
 class MysqlFlockStore(private val jdbc: JdbcTemplate, private val mapper: JsonMapper) : FlockStore {
-
     @Transactional(readOnly = true)
     override fun sheepPage(userId: String, after: SheepCursor?, limit: Int): List<SheepResponse> {
         val rowMapper = RowMapper { rs, _ -> sheep(rs) }
@@ -84,7 +79,6 @@ class MysqlFlockStore(private val jdbc: JdbcTemplate, private val mapper: JsonMa
             mapper.writeValueAsString(placements), version, sheepId)
     }
 
-    /** 삭제된 카드도 응답한다(available=false, content=null, viewer 모두 false). */
     private fun card(userId: String, nightId: String, cardId: String): CardResponse {
         val card = jdbc.first("SELECT * FROM feed_card_catalog WHERE id = ?", cardId) { rs ->
             val kind = wire<CardKind>(rs.getString("kind"))
