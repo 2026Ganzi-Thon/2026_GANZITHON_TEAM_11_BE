@@ -67,12 +67,12 @@ class HttpItunesClient(
     }
 
     override fun search(term: String, limit: Int): List<ItunesTrack> = fetch {
-        it.path("/search").queryParam("term", term).queryParam("country", "KR").queryParam("media", "music")
+        it.path("/search").queryParam("term", term).queryParam("country", "US").queryParam("media", "music")
             .queryParam("entity", "song").queryParam("limit", limit).build()
     }
 
     override fun lookup(trackId: Long): ItunesTrack? = fetch {
-        it.path("/lookup").queryParam("id", trackId).queryParam("country", "KR").queryParam("entity", "song").build()
+        it.path("/lookup").queryParam("id", trackId).queryParam("country", "US").queryParam("entity", "song").build()
     }.firstOrNull { it.trackId == trackId }
 
     private fun fetch(uri: (UriBuilder) -> URI): List<ItunesTrack> {

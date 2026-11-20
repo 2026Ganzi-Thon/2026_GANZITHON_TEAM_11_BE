@@ -27,7 +27,7 @@ class MysqlMusicCatalog(
 ) : MusicCatalog {
     override fun search(query: String, limit: Int): List<TrackResponse> {
         val normalized = normalize(query)
-        val hash = sha256(normalized)
+        val hash = sha256("US:$normalized")
         val now = clock.millis()
         val cached = jdbc.first("SELECT track_ids_json, cached_at_ms FROM music_search_cache WHERE query_hash = ?", hash) {
             mapper.readValue(it.getString("track_ids_json"), Array<String>::class.java).toList() to it.getLong("cached_at_ms")
