@@ -16,6 +16,7 @@ import org.junit.jupiter.params.provider.ValueSource
 import org.mockito.Mockito.*
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
+import org.springframework.test.context.ActiveProfiles
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean
@@ -33,6 +34,7 @@ import java.util.concurrent.atomic.AtomicReference
  * Latches place the contender at the lock while the leader is still uncommitted.
  */
 @SpringBootTest
+@ActiveProfiles("session-test")
 open class Be1P1ConcurrencyTest {
     @Autowired lateinit var auth: AuthService
     @MockitoSpyBean lateinit var store: AuthStore

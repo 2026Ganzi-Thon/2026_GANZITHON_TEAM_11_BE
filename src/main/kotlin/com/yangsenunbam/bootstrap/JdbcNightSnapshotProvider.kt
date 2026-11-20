@@ -5,14 +5,15 @@ import com.yangsenunbam.night.NightStore
 import com.yangsenunbam.session.MorningCandidatePort
 import com.yangsenunbam.session.SessionService
 import com.yangsenunbam.session.SessionStore
+import org.springframework.context.annotation.Profile
 import org.springframework.stereotype.Component
 import org.springframework.transaction.annotation.Transactional
 import tools.jackson.databind.json.JsonMapper
 import java.time.Clock
 import java.time.LocalDate
 
-/** Replaces EmptyNightSnapshotProvider; uses BE1 session records and a BE2 morning adapter. */
 @Component
+@Profile("mysql | session-test")
 class JdbcNightSnapshotProvider(
     private val nights: NightStore,
     private val sessions: SessionStore,
@@ -31,8 +32,6 @@ class JdbcNightSnapshotProvider(
         val current = sessions.activeForNight(night.id)
         val closed = latest?.status == SessionStatus.STOPPED && latest.closingViewedAtMs == null
         val isDay = time.now().phase == Phase.DAY
-        // For a night with sessions, an unconfigured BE2 adapter fails closed rather than
-        // silently showing HOME and skipping morning adoption.
         val needsAdoption = isDay && latest != null && morning.hasCandidate(userId, night.id)
         val support = if (night.supportTriggered) night.supportJson?.let {
             mapper.readValue(it, SupportResponse::class.java)
@@ -42,6 +41,22 @@ class JdbcNightSnapshotProvider(
             lastSession = latest?.let(service::latestSummary),
             support = support, supportTriggered = night.supportTriggered,
             closingPending = closed, hasWorry = true, hasUnadoptedCandidate = needsAdoption,
+        )
+    }
+}
+
+@Component
+@Profile("!mysql & !session-test")
+class JdbcWorrySnapshotProvider(private val nights: NightStore, private val mapper: JsonMapper) : NightSnapshotProvider {
+    @Transactional
+    override fun forUser(userId: String, nightDate: LocalDate): NightSnapshot {
+        nights.lockAccount(userId)
+        val night = nights.byDate(userId, nightDate) ?: return NightSnapshot()
+        return NightSnapshot(
+            nightId = night.id,
+            support = if (night.supportTriggered) night.supportJson?.let { mapper.readValue(it, SupportResponse::class.java) } else null,
+            supportTriggered = night.supportTriggered,
+            hasWorry = true,
         )
     }
 }

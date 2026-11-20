@@ -378,8 +378,9 @@ class MysqlBe2Test {
             .andExpect(status().isNoContent)
         putWithToken("/me/birth-date", """{"birth_date":"2000-06-01"}""").andExpect(status().isOk)
         putWithToken("/me/day-intro", """{"acknowledged":true}""").andExpect(status().isNoContent)
-        val night = putWithToken("/nights/current/worry", """{"category_id":"none","worry_text":null}""")
-            .andExpect(status().isOk).andReturn()
+        val night = putWithToken("/nights/current/worry",
+            """{"category_id":"career","worry_text":"내일 있을 면접이 걱정돼요."}""")
+            .andExpect(status().isOk).andExpect(jsonPath("$.status").value("ready")).andReturn()
         val nightId = mapper.readTree(night.response.contentAsString).path("id").asString()
         val session = postWithToken("/nights/$nightId/sessions", "start", """{"sheep_count":3}""")
             .andExpect(status().isCreated).andReturn()

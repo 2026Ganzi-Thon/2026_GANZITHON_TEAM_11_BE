@@ -81,6 +81,14 @@ class FeedBuilderTest {
         val songs = requests.filter { it.slot.song }
         assertThat(songs.map { it.userSongsOnly }).containsExactly(false, true)
         assertThat(songs.map { it.allowAi }).containsExactly(true, false)
+        requests.clear()
+        val fallbackItems = FeedBuilder { selection ->
+            if (selection.slot.song && selection.userSongsOnly) { requests += selection; null }
+            else source.select(selection)?.let { if (selection.slot.song && !selection.allowAi) it.copy(authorType = AuthorType.EDITORIAL) else it }
+        }.build("user", 16, CategoryId.CAREER)
+        assertThat(fallbackItems).hasSize(16)
+        assertThat(requests.filter { it.slot.position == 12 }.map { it.userSongsOnly to it.allowAi })
+            .containsExactly(true to false, false to false)
         fails(ErrorCode.FEED_BUILD_UNAVAILABLE) {
             FeedBuilder { selection -> source.select(selection)?.let {
                 if (selection.slot.song) it.copy(authorType = AuthorType.AI) else it

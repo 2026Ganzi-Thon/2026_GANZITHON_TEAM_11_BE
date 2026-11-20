@@ -1,6 +1,10 @@
 package com.yangsenunbam
 
 import com.yangsenunbam.security.CurrentUser
+import com.yangsenunbam.session.ClosingCardPort
+import com.yangsenunbam.session.ClosingCardVisibilityPort
+import com.yangsenunbam.session.FeedPreparationPort
+import com.yangsenunbam.session.MorningCandidatePort
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
@@ -14,6 +18,8 @@ import org.springframework.http.MediaType
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
 import org.springframework.security.core.authority.SimpleGrantedAuthority
 import org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication
+import org.springframework.test.context.ActiveProfiles
+import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.*
@@ -21,6 +27,8 @@ import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandl
 
 @SpringBootTest
 @AutoConfigureMockMvc
+@ActiveProfiles("session-test")
+@MockitoBean(types = [FeedPreparationPort::class, ClosingCardPort::class, ClosingCardVisibilityPort::class, MorningCandidatePort::class])
 class ApiSkeletonTest {
     @Autowired lateinit var mvc: MockMvc
     @Autowired @Qualifier("requestMappingHandlerMapping") lateinit var mappings: RequestMappingHandlerMapping
@@ -171,9 +179,13 @@ class ApiSkeletonTest {
 
     @Test
     fun `text limits count Unicode code points and password minimum is eight`() {
-        postCard("""{"kind":"text","category_id":"career","content":{"text":"${"🐑".repeat(300)}"}}""")
+        postCard("""{"kind":"text","category_id":"career","content":{"text":"${"🐑".repeat(200)}"}}""")
             .andExpect(status().isNotImplemented)
-        postCard("""{"kind":"text","category_id":"career","content":{"text":"${"🐑".repeat(301)}"}}""")
+        postCard("""{"kind":"text","category_id":"career","content":{"text":"${"🐑".repeat(201)}"}}""")
+            .andExpect(status().isUnprocessableContent)
+        postCard("""{"kind":"song","category_id":"career","content":{"track_id":"track","recommendation":"${"🐑".repeat(50)}"}}""")
+            .andExpect(status().isNotImplemented)
+        postCard("""{"kind":"song","category_id":"career","content":{"track_id":"track","recommendation":"${"🐑".repeat(51)}"}}""")
             .andExpect(status().isUnprocessableContent)
         mvc.perform(post("/api/v1/auth/register").header("Idempotency-Key", "key").contentType(MediaType.APPLICATION_JSON)
             .content("""{"email":"user@example.com","password":"12345678"}""")).andExpect(status().isCreated)

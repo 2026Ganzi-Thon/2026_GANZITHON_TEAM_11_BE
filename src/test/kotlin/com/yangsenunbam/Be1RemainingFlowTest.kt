@@ -17,6 +17,7 @@ import org.junit.jupiter.params.provider.CsvSource
 import org.mockito.Mockito.*
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
+import org.springframework.test.context.ActiveProfiles
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.test.context.bean.override.mockito.MockitoBean
 import java.time.Clock
@@ -29,6 +30,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
 @SpringBootTest
+@ActiveProfiles("session-test")
 class Be1RemainingFlowTest {
     @Autowired lateinit var auth: AuthService
     @Autowired lateinit var authStore: AuthStore

@@ -1,10 +1,7 @@
 package com.yangsenunbam.session
 
 import com.yangsenunbam.card.CardResponse
-import com.yangsenunbam.common.*
-import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
-import org.springframework.context.annotation.Configuration
-import org.springframework.context.annotation.Bean
+import com.yangsenunbam.common.FinishReason
 
 /** BE2 owns feed data used by the BE1 session lifecycle in the same transaction. */
 interface FeedPreparationPort {
@@ -27,35 +24,3 @@ interface ClosingCardVisibilityPort { fun lockAndCheckAvailable(cardId: String):
 
 /** BE2 provides the existence of adoptable-but-not-adopted candidates for bootstrap daytime routing. */
 interface MorningCandidatePort { fun hasCandidate(userId: String, nightId: String): Boolean }
-
-@Configuration
-class MissingIntegrationPorts {
-    @Bean
-    @ConditionalOnMissingBean(ClosingCardVisibilityPort::class)
-    fun missingVisibility() = object : ClosingCardVisibilityPort {
-        override fun lockAndCheckAvailable(cardId: String): Boolean =
-            throw ApiException(ErrorCode.FEED_BUILD_UNAVAILABLE, "마무리 카드 공개 상태 연동이 필요해요.")
-    }
-    @Bean
-    @ConditionalOnMissingBean(FeedPreparationPort::class)
-    fun missingFeed() = object : FeedPreparationPort {
-        override fun prepare(userId: String, nightId: String, sessionId: String, sheepCount: Int): Int =
-            throw ApiException(ErrorCode.FEED_BUILD_UNAVAILABLE, "BE2 피드 생성 연동이 필요해요.")
-        override fun canFinishStopPause(sessionId: String, position: Int): Boolean =
-            throw ApiException(ErrorCode.FEED_BUILD_UNAVAILABLE, "BE2 쉼표 검증 연동이 필요해요.")
-        override fun countSavedFluff(nightId: String, sessionId: String, furthestPosition: Int): Int =
-            throw ApiException(ErrorCode.FEED_BUILD_UNAVAILABLE, "BE2 솜털 집계 연동이 필요해요.")
-    }
-    @Bean
-    @ConditionalOnMissingBean(ClosingCardPort::class)
-    fun missingClosing() = object : ClosingCardPort {
-        override fun choose(userId: String, nightId: String, sessionId: String, reason: FinishReason): CardResponse =
-            throw ApiException(ErrorCode.FEED_BUILD_UNAVAILABLE, "검수된 마무리 카드 연동이 필요해요.")
-    }
-    @Bean
-    @ConditionalOnMissingBean(MorningCandidatePort::class)
-    fun missingMorning() = object : MorningCandidatePort {
-        override fun hasCandidate(userId: String, nightId: String): Boolean =
-            throw ApiException(ErrorCode.FEED_BUILD_UNAVAILABLE, "BE2 아침 후보 연동이 필요해요.")
-    }
-}

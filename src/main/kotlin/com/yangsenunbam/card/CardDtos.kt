@@ -19,7 +19,7 @@ data class TextCardContent(val text: String) : CardContentResponse
 data class SongCardContent(val track: TrackResponse, val recommendation: String?) : CardContentResponse
 
 sealed interface CardContentRequest
-data class TextContentRequest(@field:TextLength(min = 1, max = 300) val text: String) : CardContentRequest
+data class TextContentRequest(@field:TextLength(min = 1, max = 200) val text: String) : CardContentRequest
 data class ManualTrackRequest(
     @field:TextLength(min = 1, max = 200) val title: String,
     @field:TextLength(min = 1, max = 200) val artist: String,
@@ -27,7 +27,7 @@ data class ManualTrackRequest(
 data class SongContentRequest(
     @field:TextLength(min = 1) val trackId: String? = null,
     @field:Valid val manualTrack: ManualTrackRequest? = null,
-    @field:TextLength(min = 1, max = 150) val recommendation: String,
+    @field:TextLength(min = 1, max = 50) val recommendation: String,
 ) : CardContentRequest {
     @AssertTrue(message = "검색한 곡 또는 직접 입력한 곡 중 하나를 보내 주세요.")
     @JsonIgnore
