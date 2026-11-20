@@ -16,6 +16,7 @@ class NightService(
     private val clock: Clock,
     private val safety: WorrySafetyGateway,
     private val mapper: JsonMapper,
+    private val reflectionDeletion: WorryReflectionDeletionPort,
 ) {
     private val labels = mapOf(
         CategoryId.ROMANCE to "연애", CategoryId.CAREER to "진로", CategoryId.STUDY to "공부",
@@ -131,5 +132,7 @@ class NightService(
         // BE1 currently stores no worry embeddings/summaries. If one is introduced, it must be
         // removed transactionally through an agreed deletion port before invoking this update.
         if (!record.worryDeleted) store.deleteWorry(record.id)
+        // Also repair historical deletions that predate reflection cleanup.
+        reflectionDeletion.deleteReflection(record.id)
     }
 }
