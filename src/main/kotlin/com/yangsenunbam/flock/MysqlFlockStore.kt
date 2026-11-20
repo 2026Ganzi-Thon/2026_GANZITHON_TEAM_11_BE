@@ -69,6 +69,21 @@ class MysqlFlockStore(private val jdbc: JdbcTemplate, private val mapper: JsonMa
             StickerResponse(rs.getString("id"), rs.getString("label"), rs.getString("asset_url"))
         })
 
+    override fun lockSheep(userId: String, sheepId: String): SheepResponse? =
+        jdbc.first("SELECT * FROM adopted_sheep WHERE id = ? AND user_id = ? FOR UPDATE", sheepId, userId) { sheep(it) }
+
+    override fun unknownStickers(stickerIds: Set<String>): Set<String> {
+        if (stickerIds.isEmpty()) return emptySet()
+        val known = jdbc.queryForList("SELECT id FROM stickers WHERE id IN (${stickerIds.joinToString(",") { "?" }})",
+            String::class.java, *stickerIds.toTypedArray()).filterNotNull().toSet()
+        return stickerIds - known
+    }
+
+    override fun savePlacements(sheepId: String, placements: List<Placement>, version: Int) {
+        jdbc.update("UPDATE adopted_sheep SET placements_json = ?, version = ? WHERE id = ?",
+            mapper.writeValueAsString(placements), version, sheepId)
+    }
+
     /** 삭제된 카드도 응답한다(available=false, content=null, viewer 모두 false). */
     private fun card(userId: String, nightId: String, cardId: String): CardResponse {
         val card = jdbc.first("SELECT * FROM feed_card_catalog WHERE id = ?", cardId) { rs ->
