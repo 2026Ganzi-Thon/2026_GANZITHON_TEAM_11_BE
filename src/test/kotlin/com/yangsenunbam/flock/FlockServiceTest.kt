@@ -1,5 +1,7 @@
 package com.yangsenunbam.flock
 
+import com.yangsenunbam.be2.MutableClock
+import com.yangsenunbam.bootstrap.KstNightTime
 import com.yangsenunbam.common.ApiException
 import com.yangsenunbam.common.CursorCodec
 import com.yangsenunbam.common.ErrorCode
@@ -14,7 +16,8 @@ class FlockServiceTest {
     private val user = CurrentUser("u_1", true)
     private val d9 = LocalDate.parse("2026-11-09")
     private val store = FakeFlockStore()
-    private val service = FlockService(store)
+    private val clock = MutableClock(Instant.parse("2026-11-11T03:00:00Z"))
+    private val service = FlockService(store, KstNightTime(clock))
 
     @Test
     fun `cursor로 끝까지 넘기면 night_date·id 내림차순으로 빠짐없이 중복없이 조회된다`() {
@@ -32,7 +35,6 @@ class FlockServiceTest {
         } while (cursor != null)
 
         assertThat(pages).isEqualTo(3)
-        // night_date: sh_3=d9, sh_1·sh_4=d10, sh_2·sh_5=d11
         assertThat(seen).containsExactly("sh_5", "sh_2", "sh_4", "sh_1", "sh_3")
     }
 
@@ -80,7 +82,41 @@ class FlockServiceTest {
         assertThat(service.stickers(user).items.map { it.id }).containsExactly("st_1", "st_2")
     }
 
-    /** 저장소 계약(정렬·cursor·소유자)을 그대로 흉내 내는 메모리 구현. */
+    @Test
+    fun `스티커 배치는 낮에 전체 교체되고 version이 1 오른다`() {
+        store.add("u_1", "sh_1", d9)
+        store.stickers += StickerResponse("st_1", "달", "a")
+
+        val saved = service.saveStickers(user, "sh_1", SaveStickersRequest(1, listOf(placement("pl_1", "st_1"))))
+
+        assertThat(saved.version).isEqualTo(2)
+        assertThat(saved.placements.map { it.instanceId }).containsExactly("pl_1")
+        assertThat(store.lockSheep("u_1", "sh_1")!!.version).isEqualTo(2)
+    }
+
+    @Test
+    fun `스티커 배치 오류 - 남의 양 404, 밤 DAY_ONLY, 이전 version VERSION_CONFLICT, 없는 스티커 422`() {
+        store.add("u_2", "sh_x", d9)
+        store.add("u_1", "sh_1", d9)
+        store.stickers += StickerResponse("st_1", "달", "a")
+        val ok = SaveStickersRequest(1, listOf(placement("pl_1", "st_1")))
+
+        assertCode(ErrorCode.RESOURCE_NOT_FOUND) { service.saveStickers(user, "sh_x", ok) }
+        assertCode(ErrorCode.VERSION_CONFLICT) { service.saveStickers(user, "sh_1", SaveStickersRequest(2, emptyList())) }
+        assertCode(ErrorCode.VALIDATION_ERROR) {
+            service.saveStickers(user, "sh_1", SaveStickersRequest(1, listOf(placement("pl_1", "st_none"))))
+        }
+        clock.current = Instant.parse("2026-11-11T12:00:00Z")
+        assertCode(ErrorCode.DAY_ONLY) { service.saveStickers(user, "sh_1", ok) }
+    }
+
+    private fun placement(instanceId: String, stickerId: String) = Placement(
+        instanceId, stickerId, java.math.BigDecimal("0.4"), java.math.BigDecimal("0.6"), java.math.BigDecimal.ZERO, java.math.BigDecimal.ONE)
+
+    private fun assertCode(code: ErrorCode, block: () -> Unit) {
+        assertThatThrownBy(block).isInstanceOfSatisfying(ApiException::class.java) { assertThat(it.code).isEqualTo(code) }
+    }
+
     private class FakeFlockStore : FlockStore {
         private val sheep = mutableListOf<Pair<String, SheepResponse>>()
         val stickers = mutableListOf<StickerResponse>()
@@ -98,5 +134,15 @@ class FlockServiceTest {
         override fun sheepDetail(userId: String, sheepId: String): SheepDetailResponse? = null
 
         override fun stickers(): List<StickerResponse> = stickers
+
+        override fun lockSheep(userId: String, sheepId: String): SheepResponse? =
+            sheep.firstOrNull { it.first == userId && it.second.id == sheepId }?.second
+
+        override fun unknownStickers(stickerIds: Set<String>): Set<String> = stickerIds - stickers.map { it.id }.toSet()
+
+        override fun savePlacements(sheepId: String, placements: List<Placement>, version: Int) {
+            val index = sheep.indexOfFirst { it.second.id == sheepId }
+            sheep[index] = sheep[index].first to sheep[index].second.copy(placements = placements, version = version)
+        }
     }
 }

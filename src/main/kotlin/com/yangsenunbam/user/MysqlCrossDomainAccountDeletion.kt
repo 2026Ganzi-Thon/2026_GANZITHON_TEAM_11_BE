@@ -11,7 +11,7 @@ import org.springframework.transaction.annotation.Propagation
 import org.springframework.transaction.annotation.Transactional
 import java.time.Clock
 
-/** V1–V4 shared schema only. New BE3 ownership tables must extend this adapter.
+/** V1–V5 shared schema. New ownership tables must extend this adapter.
  * UserService deletes BE1 sessions/nights afterwards; their V3 children cascade.
  * Card tombstones must survive references from other users' feeds and adopted sheep.
  */
@@ -26,6 +26,7 @@ class MysqlCrossDomainAccountDeletion(
 ) : CrossDomainAccountDeletionPort {
     override fun deleteOwnedData(userId: String) {
         if (auth.lockUser(userId) == null) throw ApiException(ErrorCode.RESOURCE_NOT_FOUND, "계정이 없어요.")
+        jdbc.queryForList("SELECT id FROM card_submissions WHERE user_id = ? ORDER BY id FOR UPDATE", String::class.java, userId)
         // Acquire own domain locks before card locks, including rows CASCADE will delete.
         jdbc.queryForList("SELECT id FROM be1_nights WHERE user_id = ? ORDER BY id FOR UPDATE", String::class.java, userId)
         val cardIds = jdbc.queryForList(
@@ -58,6 +59,11 @@ class MysqlCrossDomainAccountDeletion(
             jdbc.update("DELETE FROM feed_card_yarn WHERE card_id = ?", cardId)
         }
         jdbc.update("DELETE FROM feed_card_yarn WHERE user_id = ?", userId)
+        cardIds.forEach { jdbc.update("DELETE FROM yarn_events WHERE card_id = ?", it) }
+        jdbc.update("DELETE FROM yarn_events WHERE user_id = ?", userId)
+        jdbc.update("DELETE FROM yarn_summaries WHERE user_id = ?", userId)
+        jdbc.update("DELETE FROM card_idempotency WHERE user_id = ?", userId)
+        jdbc.update("DELETE FROM card_submissions WHERE user_id = ?", userId)
         jdbc.update("DELETE FROM feed_resume_receipts WHERE user_id = ?", userId)
         jdbc.update("DELETE FROM adopted_sheep WHERE user_id = ?", userId)
     }

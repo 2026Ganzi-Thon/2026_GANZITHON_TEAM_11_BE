@@ -21,14 +21,9 @@ import tools.jackson.databind.json.JsonMapper
 import java.sql.Date
 import java.sql.ResultSet
 
-/**
- * BE2가 채택 시 삽입한 adopted_sheep와 BE2 카드 공개 목록(feed_card_catalog)을 읽어 양떼 응답을 만든다.
- * 밤 고민은 BE1의 be1_nights, 회고는 BE2의 night_feed_state, 솜털·노래 담기는 night_reactions에서 읽는다.
- */
 @Repository
 @Profile("mysql")
 class MysqlFlockStore(private val jdbc: JdbcTemplate, private val mapper: JsonMapper) : FlockStore {
-
     @Transactional(readOnly = true)
     override fun sheepPage(userId: String, after: SheepCursor?, limit: Int): List<SheepResponse> {
         val rowMapper = RowMapper { rs, _ -> sheep(rs) }
@@ -69,7 +64,21 @@ class MysqlFlockStore(private val jdbc: JdbcTemplate, private val mapper: JsonMa
             StickerResponse(rs.getString("id"), rs.getString("label"), rs.getString("asset_url"))
         })
 
-    /** 삭제된 카드도 응답한다(available=false, content=null, viewer 모두 false). */
+    override fun lockSheep(userId: String, sheepId: String): SheepResponse? =
+        jdbc.first("SELECT * FROM adopted_sheep WHERE id = ? AND user_id = ? FOR UPDATE", sheepId, userId) { sheep(it) }
+
+    override fun unknownStickers(stickerIds: Set<String>): Set<String> {
+        if (stickerIds.isEmpty()) return emptySet()
+        val known = jdbc.queryForList("SELECT id FROM stickers WHERE id IN (${stickerIds.joinToString(",") { "?" }})",
+            String::class.java, *stickerIds.toTypedArray()).filterNotNull().toSet()
+        return stickerIds - known
+    }
+
+    override fun savePlacements(sheepId: String, placements: List<Placement>, version: Int) {
+        jdbc.update("UPDATE adopted_sheep SET placements_json = ?, version = ? WHERE id = ?",
+            mapper.writeValueAsString(placements), version, sheepId)
+    }
+
     private fun card(userId: String, nightId: String, cardId: String): CardResponse {
         val card = jdbc.first("SELECT * FROM feed_card_catalog WHERE id = ?", cardId) { rs ->
             val kind = wire<CardKind>(rs.getString("kind"))

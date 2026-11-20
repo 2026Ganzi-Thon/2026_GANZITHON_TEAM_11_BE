@@ -3,10 +3,6 @@ package com.yangsenunbam.common
 import java.nio.charset.StandardCharsets
 import java.util.Base64
 
-/**
- * 정렬 키를 클라이언트가 해석할 필요 없는 불투명 cursor 문자열로 바꾼다.
- * 형식이 틀린 cursor는 422 VALIDATION_ERROR(fields.cursor).
- */
 object CursorCodec {
     private const val SEPARATOR = "\u001F"
 

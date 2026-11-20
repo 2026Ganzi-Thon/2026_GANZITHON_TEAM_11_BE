@@ -28,7 +28,6 @@ import java.sql.Date
 import java.time.Instant
 import java.time.LocalDate
 
-/** BE3 양떼·스티커 조회를 BE1·BE2 MySQL 테이블 위에서 HTTP부터 검증한다. `./gradlew mysqlTest`로 실행한다. */
 @Tag("mysql")
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -46,7 +45,6 @@ class MysqlBe3FlockTest {
 
     @BeforeEach
     fun clean() {
-        // 일회용 *_test 스키마를 대상으로 한다. BE2 테스트와 같은 순서로 카드 참조 테이블을 비운다.
         listOf("feed_resume_receipts", "adopted_sheep", "night_reactions", "feed_card_views", "feed_items",
             "feed_session_progress", "night_feed_state", "feed_card_yarn", "feed_card_history", "feed_card_catalog",
             "stickers").forEach { jdbc.update("DELETE FROM $it") }
@@ -99,7 +97,6 @@ class MysqlBe3FlockTest {
 
     @Test
     fun `GET sheep는 cursor로 끝까지 넘겨도 빠짐없이 중복없이 본인 양만 나온다`() {
-        // be1_nights는 (user_id, night_date)가 유일하므로 사용자당 날짜가 겹치지 않는다.
         val offsets = mapOf("sh_1" to 2L, "sh_2" to 4L, "sh_3" to 0L, "sh_4" to 3L, "sh_5" to 1L)
         for ((id, offset) in offsets) {
             val date = d9.plusDays(offset)
