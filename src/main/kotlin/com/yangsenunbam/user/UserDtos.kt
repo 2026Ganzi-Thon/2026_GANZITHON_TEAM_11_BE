@@ -5,7 +5,6 @@ import com.fasterxml.jackson.annotation.JsonProperty
 import com.yangsenunbam.common.*
 import jakarta.validation.constraints.AssertTrue
 import jakarta.validation.constraints.NotBlank
-import jakarta.validation.constraints.PastOrPresent
 import jakarta.validation.constraints.Pattern
 import java.time.LocalDate
 
@@ -22,7 +21,8 @@ data class ConsentsRequest(
     @field:AssertTrue val privacyAccepted: Boolean,
 )
 data class DayIntroRequest(@field:AssertTrue val acknowledged: Boolean)
-data class BirthDateRequest(@field:PastOrPresent val birthDate: LocalDate)
+// KST validation must happen in the service, not in a server-default-timezone @PastOrPresent annotation.
+data class BirthDateRequest(val birthDate: LocalDate)
 data class ReminderRequest(
     val enabled: Boolean,
     @param:JsonProperty(required = true)

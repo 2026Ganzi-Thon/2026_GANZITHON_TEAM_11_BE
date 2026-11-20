@@ -1,11 +1,16 @@
 package com.yangsenunbam
 
 import com.yangsenunbam.security.CurrentUser
+import com.yangsenunbam.session.ClosingCardPort
+import com.yangsenunbam.session.ClosingCardVisibilityPort
+import com.yangsenunbam.session.FeedPreparationPort
+import com.yangsenunbam.session.MorningCandidatePort
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.MethodSource
 import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc
 import org.springframework.http.HttpMethod
@@ -13,6 +18,8 @@ import org.springframework.http.MediaType
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
 import org.springframework.security.core.authority.SimpleGrantedAuthority
 import org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication
+import org.springframework.test.context.ActiveProfiles
+import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.*
@@ -20,9 +27,11 @@ import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandl
 
 @SpringBootTest
 @AutoConfigureMockMvc
+@ActiveProfiles("session-test")
+@MockitoBean(types = [FeedPreparationPort::class, ClosingCardPort::class, ClosingCardVisibilityPort::class, MorningCandidatePort::class])
 class ApiSkeletonTest {
     @Autowired lateinit var mvc: MockMvc
-    @Autowired lateinit var mappings: RequestMappingHandlerMapping
+    @Autowired @Qualifier("requestMappingHandlerMapping") lateinit var mappings: RequestMappingHandlerMapping
 
     @Test
     fun `all 47 specification endpoints are registered without extra product routes`() {
@@ -37,6 +46,19 @@ class ApiSkeletonTest {
     @ParameterizedTest(name = "{0}")
     @MethodSource("requests")
     fun `valid requests reach an explicit unimplemented service`(case: ApiCase) {
+        if ("${case.method} ${case.path}" in setOf(
+            "GET /me", "GET /legal-documents", "GET /bootstrap", "PUT /me/consents",
+            "PUT /me/day-intro", "PUT /me/birth-date", "PUT /me/reminder"
+        )) return
+        if (case.method == "POST" && case.path in setOf("/auth/register", "/auth/login", "/auth/refresh", "/auth/logout")) return
+        // BE1_REMAINING_IMPLEMENTED: real BE1 endpoints no longer return 501.
+        if ("${case.method} ${case.path}" in setOf(
+            "POST /auth/password-reset/request", "POST /auth/password-reset/confirm",
+            "GET /categories", "PUT /nights/current/worry",
+            "POST /nights/{night_id}/support/continue", "POST /nights/{night_id}/sessions",
+            "POST /sessions/{session_id}/finish", "PUT /nights/{night_id}/writing-offer",
+            "GET /me/worries", "DELETE /nights/{night_id}/worry", "DELETE /me"
+        )) return
         val path = case.path.replace(Regex("\\{[^}]+}"), "id")
         val request = request(HttpMethod.valueOf(case.method), "/api/v1$path").with(auth(admin = true))
         if (case.idempotent) request.header("Idempotency-Key", "request-1")
@@ -50,10 +72,10 @@ class ApiSkeletonTest {
 
     @Test
     fun `public endpoints do not require a login and protected endpoints reject unverified tokens`() {
-        mvc.perform(get("/api/v1/legal-documents")).andExpect(status().isNotImplemented)
+        mvc.perform(get("/api/v1/legal-documents")).andExpect(status().isOk)
         mvc.perform(post("/api/v1/auth/login").header("Idempotency-Key", "login")
             .contentType(MediaType.APPLICATION_JSON).content("""{"email":"user@example.com","password":"password"}"""))
-            .andExpect(status().isNotImplemented)
+            .andExpect(status().isUnauthorized)
         mvc.perform(get("/api/v1/me")).andExpect(status().isUnauthorized)
             .andExpect(jsonPath("$.error.code").value("UNAUTHORIZED"))
         mvc.perform(get("/api/v1/me").header("Authorization", "Bearer unverified"))
@@ -66,8 +88,8 @@ class ApiSkeletonTest {
             .andExpect(jsonPath("$.error.code").value("ADMIN_REQUIRED"))
         mvc.perform(get("/api/v1/me").with(auth(complete = false))).andExpect(status().isForbidden)
             .andExpect(jsonPath("$.error.code").value("ONBOARDING_REQUIRED"))
-        mvc.perform(get("/api/v1/bootstrap").with(auth(complete = false))).andExpect(status().isNotImplemented)
-        mvc.perform(delete("/api/v1/me").with(auth(complete = false))).andExpect(status().isNotImplemented)
+        mvc.perform(get("/api/v1/bootstrap").with(auth(complete = false))).andExpect(status().isNotFound)
+        mvc.perform(delete("/api/v1/me").with(auth(complete = false))).andExpect(status().isNotFound)
     }
 
     @Test
@@ -110,9 +132,7 @@ class ApiSkeletonTest {
 
     @Test
     fun `reminders use fifteen minute intervals and consistent enabled state`() {
-        for (time in listOf("00:00", "09:15", "22:30", "23:45")) {
-            putJson("/me/reminder", """{"enabled":true,"local_time":"$time"}""").andExpect(status().isNotImplemented)
-        }
+        // Valid reminder saves are exercised by Be1OnboardingFlowTest using a real registered user.
         for (body in listOf("""{"enabled":true,"local_time":"22:10"}""", """{"enabled":true,"local_time":"24:00"}""",
             """{"enabled":true,"local_time":null}""", """{"enabled":false,"local_time":"22:00"}""")) {
             putJson("/me/reminder", body).andExpect(status().isUnprocessableContent)
@@ -159,12 +179,16 @@ class ApiSkeletonTest {
 
     @Test
     fun `text limits count Unicode code points and password minimum is eight`() {
-        postCard("""{"kind":"text","category_id":"career","content":{"text":"${"🐑".repeat(300)}"}}""")
+        postCard("""{"kind":"text","category_id":"career","content":{"text":"${"🐑".repeat(200)}"}}""")
             .andExpect(status().isNotImplemented)
-        postCard("""{"kind":"text","category_id":"career","content":{"text":"${"🐑".repeat(301)}"}}""")
+        postCard("""{"kind":"text","category_id":"career","content":{"text":"${"🐑".repeat(201)}"}}""")
+            .andExpect(status().isUnprocessableContent)
+        postCard("""{"kind":"song","category_id":"career","content":{"track_id":"track","recommendation":"${"🐑".repeat(50)}"}}""")
+            .andExpect(status().isNotImplemented)
+        postCard("""{"kind":"song","category_id":"career","content":{"track_id":"track","recommendation":"${"🐑".repeat(51)}"}}""")
             .andExpect(status().isUnprocessableContent)
         mvc.perform(post("/api/v1/auth/register").header("Idempotency-Key", "key").contentType(MediaType.APPLICATION_JSON)
-            .content("""{"email":"user@example.com","password":"12345678"}""")).andExpect(status().isNotImplemented)
+            .content("""{"email":"user@example.com","password":"12345678"}""")).andExpect(status().isCreated)
         mvc.perform(post("/api/v1/auth/register").header("Idempotency-Key", "key").contentType(MediaType.APPLICATION_JSON)
             .content("""{"email":"user@example.com","password":"1234567"}""")).andExpect(status().isUnprocessableContent)
     }
