@@ -3,6 +3,7 @@ package com.yangsenunbam.night
 import com.yangsenunbam.common.*
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.http.MediaType
 import org.springframework.http.client.JdkClientHttpRequestFactory
 import org.springframework.stereotype.Component
@@ -22,6 +23,7 @@ interface WorrySafetyGateway { fun check(worry: String): WorryVerdict }
 data class WorryVerdict(val needsSupport: Boolean, val support: SupportResponse? = null)
 
 @Component
+@ConditionalOnProperty(prefix = "app.safety", name = ["mode"], havingValue = "http")
 class HttpWorrySafetyGateway internal constructor(
     private val endpoint: String,
     private val serviceToken: String,

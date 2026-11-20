@@ -9,7 +9,7 @@ import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 
-@SpringBootTest(properties = ["app.safety.endpoint=", "app.safety.service-token="])
+@SpringBootTest(properties = ["app.safety.mode=http", "app.safety.endpoint=", "app.safety.service-token="])
 class Be1MissingIntegrationTest {
     @Autowired lateinit var feed: FeedPreparationPort
     @Autowired lateinit var visibility: ClosingCardVisibilityPort

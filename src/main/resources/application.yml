@@ -40,5 +40,6 @@ app:
     url: ${RESET_URL:}
     sender: ${RESET_SENDER:}
   safety:
+    mode: ${SAFETY_MODE:local}
     endpoint: ${SAFETY_ENDPOINT:}
     service-token: ${SAFETY_SERVICE_TOKEN:}
