@@ -7,8 +7,9 @@ import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 
 /**
- * BE2/BE3 must supply this interface and delete their owned online data in the SAME
- * transaction as BE1 account deletion. Do not return success until dependent data is gone.
+ * The shared MySQL adapter deletes BE2/BE3 owned online data in the SAME
+ * transaction as BE1 account deletion. Extend it when new ownership tables are added.
+ * Do not return success until dependent data is gone.
  * External provider cleanup should be durable/outbox and auditable before release.
  */
 interface CrossDomainAccountDeletionPort { fun deleteOwnedData(userId: String) }
