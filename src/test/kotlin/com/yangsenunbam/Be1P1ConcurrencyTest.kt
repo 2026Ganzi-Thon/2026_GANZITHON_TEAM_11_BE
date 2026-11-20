@@ -55,6 +55,8 @@ open class Be1P1ConcurrencyTest {
     @MockitoBean lateinit var morning: MorningCandidatePort
     @MockitoBean lateinit var deletion: CrossDomainAccountDeletionPort
     @MockitoBean lateinit var mail: ResetMailDelivery
+    // Each test controls delivery directly, including its order relative to account changes.
+    @MockitoBean lateinit var resetWorker: PasswordResetOutboxWorker
     private val lockEntered = AtomicReference<CountDownLatch?>()
     private val cardEntered = AtomicReference<CountDownLatch?>()
     private val oldPassword = "OldFixture123!"
